@@ -1,0 +1,61 @@
+# ============================================================================
+#  네트워크 배치 — IP · 게이트웨이 · 도메인
+#  ---------------------------------------------------------------------------
+#  카메라망 / ROS 2 통신망 / 제어망을 물리적으로 분리한다.
+#  PLC 는 제어망에만 붙으며, 카메라 트래픽(대당 ~1.5 Gbps)과 절대 섞지 않는다.
+# ============================================================================
+
+segments:
+
+  control:                         # 제어망 — PLC · 통합 컨트롤러 · Host
+    subnet: "192.168.0.0/24"
+    netmask: "255.255.255.0"
+    gateway: "192.168.0.1"         # [확인필요] 현장 게이트웨이 (VPHM 확인)
+    vlan: null
+    hosts:
+      plc:            "192.168.0.10"    # [확인필요] 공정 PLC 내장 Ethernet
+      robot_ctrl:     "192.168.0.20"    # 통합 로봇 컨트롤러 (NUC, 에이시스)
+      host_agx:       "192.168.0.61"    # Host AGX Orin (Digital Twin · XAI)
+      unity_dev:      "192.168.0.100"   # 개발 PC (Unity 에디터)
+
+  ros2:                            # ROS 2 통신망 — Edge ↔ Host
+    subnet: "192.168.0.0/24"
+    hosts:
+      edge1: "192.168.0.51"
+      edge2: "192.168.0.52"
+      edge3: "192.168.0.53"
+      host:  "192.168.0.61"
+
+  camera:                          # 카메라 전용 — Edge 별 전용 포트
+    note: "센서 ↔ Edge 1:1 직결(USB) 이므로 IP 미할당. GbE 센서로 전환 시 별도 서브넷 부여"
+
+ros2:
+  domain_id: 42
+  rmw: "rmw_fastrtps_cpp"
+  # DDS 를 제어망 인터페이스에만 묶어 카메라망으로 새는 것을 막는다
+  restrict_to_interface: true
+  interface_hint: "192.168.0.0/24"
+
+# ============================================================================
+#  방화벽 / 포트
+# ============================================================================
+
+ports:
+  - { name: "MC protocol (PLC)",     proto: tcp, port: 5000,  direction: "Host → PLC" }
+  - { name: "MC protocol (sim)",     proto: tcp, port: 5010,  direction: "Host → 내부" }
+  - { name: "ROS-TCP-Endpoint",      proto: tcp, port: 10000, direction: "Unity → Host" }
+  - { name: "DDS discovery",         proto: udp, port: 7400,  direction: "내부망 전체" }
+  - { name: "DDS user traffic",      proto: udp, port: "7410-7460", direction: "내부망 전체" }
+
+# ============================================================================
+#  연결 점검 순서 (docs/02_plc_setup.md 와 대응)
+# ============================================================================
+
+checklist:
+  - "1. PC ↔ PLC 물리 결선 · 링크 LED 확인"
+  - "2. ping 192.168.0.10 응답 확인"
+  - "3. tools/plc_probe.py --host 192.168.0.10 --port 5000 → MC 3E 응답 코드 0x0000"
+  - "4. tools/plc_probe.py --dump D1000 14 → 14워드 덤프 확인"
+  - "5. ros2 launch robot_bridge bringup.launch.py profile:=field"
+  - "6. ros2 topic hz /robot/loading/cmd_degs → 18 Hz 이상"
+  - "7. Unity 재생 → 관절 6축이 실로봇과 동일하게 움직이는지 육안 확인"

@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>robot_bridge_sim</name>
+  <version>0.1.0</version>
+  <description>PLC · 작업자 pose 시뮬레이터 (현장 반입 전 검증용)</description>
+  <maintainer email="jhlee@sierrabase.co.kr">Sierra Base</maintainer>
+  <license>Proprietary</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

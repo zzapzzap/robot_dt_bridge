@@ -1,0 +1,114 @@
+# ============================================================================
+#  공정 PLC (MITSUBISHI MELSEC) 접속 · 메모리 할당 설정
+#  ---------------------------------------------------------------------------
+#  이 파일 하나만 고치면 브리지 전체가 따라간다.
+#  현장 반입 전에는 sim 프로파일로, 반입 후에는 field 프로파일로 실행한다.
+#
+#    ros2 launch robot_bridge bringup.launch.py profile:=sim
+#    ros2 launch robot_bridge bringup.launch.py profile:=field
+# ============================================================================
+
+profiles:
+
+  # ------------------------------------------------------------------ 실장비
+  field:
+    connection:
+      host: 192.168.0.10          # [확인필요] PLC 내장 Ethernet IP (에이시스 확인)
+      port: 5000                  # [확인필요] MC 프로토콜 개방 포트
+      frame: "3E"                 # QnUCPU = 3E / iQ-R = 4E
+      protocol: "binary"          # binary | ascii  (binary 권장 — 프레임 절반)
+      network_no: 0x00            # 자국 접속이면 0
+      pc_no: 0xFF                 # 자국 CPU = 0xFF
+      io_no: 0x03FF               # 자국 CPU 모듈 = 0x03FF
+      station_no: 0x00
+      monitor_timer_250ms: 16     # 감시 타이머 16 × 250 ms = 4 s
+      connect_timeout_s: 3.0
+      read_timeout_s: 1.0
+      reconnect_backoff_s: [0.5, 1.0, 2.0, 5.0]
+
+  # ------------------------------------------------- PLC 없이 검증 (내장 시뮬)
+  sim:
+    connection:
+      host: 127.0.0.1
+      port: 5010
+      frame: "3E"
+      protocol: "binary"
+      network_no: 0x00
+      pc_no: 0xFF
+      io_no: 0x03FF
+      station_no: 0x00
+      monitor_timer_250ms: 16
+      connect_timeout_s: 1.0
+      read_timeout_s: 0.5
+      reconnect_backoff_s: [0.3, 0.6, 1.0]
+
+# ============================================================================
+#  D 레지스터 맵  —  에이시스 「XAI 통합 현대로봇 사양 정리(’26.6.18)」 기준
+#  ---------------------------------------------------------------------------
+#  offset 은 read_block.head 로부터의 워드 오프셋이다.
+#  DWORD 는 하위워드(offset) + 상위워드(offset+1), 리틀엔디언 signed 32bit.
+# ============================================================================
+
+read_block:
+  head: "D1000"
+  words: 14                       # D1000 ~ D1013
+  poll_hz: 20                     # 사양 18 Hz(55.1 ms) 이상 — 20 Hz 로 여유
+
+status:
+  operation_state: { offset: 0,  type: word }     # D1000 로봇 운전상태
+
+axes:                             # 로딩 [S,H,V,R2,B,R1] / 언로딩 [S,L,U,R,B,T]
+  - { name: J1, offset: 2,  type: dword }         # D1002
+  - { name: J2, offset: 4,  type: dword }         # D1004
+  - { name: J3, offset: 6,  type: dword }         # D1006
+  - { name: J4, offset: 8,  type: dword }         # D1008
+  - { name: J5, offset: 10, type: dword }         # D1010
+  - { name: J6, offset: 12, type: dword }         # D1012
+
+# 상태 비트 — D1100 워드의 비트 위치
+status_bits:
+  word: "D1100"
+  bits:
+    hold:          0
+    emergency_stop: 1
+    fault_reset:   2
+    device_home:   3
+    robot_home:    4
+    standby:       5
+
+# ============================================================================
+#  쓰기(명령) 맵  —  XAI → 통합 컨트롤러 → PLC
+#    버퍼1 (긴급)  RwrD2000~2002 : 운전 / 일시정지 / 정지
+#    버퍼2 (정밀)  RwrD3000~3002 : 감속 1(25%) / 2(50%) / 3(75%)
+#  ※ RwrDxxxx 는 CC-Link 버퍼 미러 표기이며, PLC 측 실 디바이스 주소는
+#    아래 device 값으로 매핑한다.  [에이시스 확인요청] 실 주소 확정
+# ============================================================================
+
+write_block:
+  emergency:
+    device: "D2000"               # [확인필요] RwrD2000 대응 실 디바이스
+    words: 3
+    fields: { run: 0, hold: 1, stop: 2 }
+  slowdown:
+    device: "D3000"               # [확인필요] RwrD3000 대응 실 디바이스
+    words: 3
+    fields: { speed_down_1: 0, speed_down_2: 1, speed_down_3: 2 }
+  # 명령 write 는 이벤트 기반이지만, 워치독 유지를 위해 주기 재기록도 수행
+  rewrite_hz: 19                  # 사양 51.1 ms → 최대 19 회/s
+
+# ============================================================================
+#  안전 게이트  —  명령 중재 · 워치독
+# ============================================================================
+
+safety:
+  # 우선순위 : 값이 클수록 우선. 동시 수신 시 높은 쪽이 이긴다.
+  priority:
+    stop: 100                     # 비상정지
+    hold: 80                      # 일시정지
+    speed_down_3: 60              # 75 % 감속
+    speed_down_2: 40
+    speed_down_1: 20
+    run: 0
+  command_timeout_ms: 300         # 이 시간 내 갱신 없으면 지령 소멸
+  watchdog_timeout_ms: 500        # PLC 읽기 끊기면 안전측(정지) 발행
+  fail_safe: "hold"               # 통신 두절 시 취할 상태 : hold | stop | none

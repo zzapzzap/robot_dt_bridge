@@ -1,0 +1,83 @@
+# ============================================================================
+#  로봇 정의 — 축 이름 · 변환 파라미터 · 토픽
+#  ---------------------------------------------------------------------------
+#  angle_deg[i] = raw_dword[i] * scale[i] * dir[i] + offset_deg[i]
+#
+#  scale / dir / offset 은 실측 캘리브레이션으로 확정한다 (docs/04_calibration.md).
+#  확정 전에는 아래 기본값으로 동작하되, 로그에 [미교정] 경고를 남긴다.
+# ============================================================================
+
+robots:
+
+  - id: loading
+    label: "현대 로딩 로봇 (YS080)"
+    enabled: true
+    plc_profile_block: read_block          # plc.yaml 의 read_block 사용
+    axis_names: [S, H, V, R2, B, R1]
+    calibrated: false                      # 실측 완료 시 true 로 변경
+    scale:  [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]   # [확인필요] deg/LSB
+    dir:    [1, 1, 1, 1, 1, 1]                            # [확인필요] ±1
+    offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]                # [확인필요] deg
+    limits_deg:                            # 안전 범위 — 벗어나면 마지막 유효값 유지
+      min: [-180, -90,  -90, -180, -135, -360]
+      max: [ 180, 155,  255,  180,  135,  360]
+    topics:
+      memory:  "/robot/loading/memory"
+      pose:    "/robot/loading/cmd_degs"
+      state:   "/robot/loading/state"
+      command: "/robot/loading/command"
+
+  - id: unloading
+    label: "현대 언로딩 로봇 (HH050)"
+    enabled: false                         # 3차년도 실증 대상 ② 확정 후 true
+    plc_profile_block: read_block
+    axis_names: [S, L, U, R, B, T]
+    calibrated: false
+    scale:  [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]
+    dir:    [1, 1, 1, 1, 1, 1]
+    offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    limits_deg:
+      min: [-180, -90,  -90, -180, -135, -360]
+      max: [ 180, 155,  255,  180,  135,  360]
+    topics:
+      memory:  "/robot/unloading/memory"
+      pose:    "/robot/unloading/cmd_degs"
+      state:   "/robot/unloading/state"
+      command: "/robot/unloading/command"
+
+# ============================================================================
+#  작업자 (사람 pose) — MVP 융합 결과를 그대로 구독
+#  ※ 발행측은 [SB] Multiview Human Pose Estimation / multiview_pose
+# ============================================================================
+
+workers:
+  topic_prefix: "/worker/pose"      # /worker/pose0_joints … /worker/pose4_joints
+  suffix: "_joints"
+  max_bodies: 5
+  joints: 28
+  frame_id: "stag_marker"
+  stale_timeout_ms: 500             # 이 시간 넘게 미수신이면 Unity 에서 숨김
+
+# ============================================================================
+#  Unity 어댑터 — 커스텀 msg 를 std_msgs 로 변환해 Unity 가 코드젠 없이 받게 함
+# ============================================================================
+
+unity:
+  ros_tcp_endpoint:
+    host: "0.0.0.0"
+    port: 10000
+  state_layout:                     # Int32MultiArray 순서 (Unity 와 동일해야 함)
+    - run
+    - hold
+    - emergency_stop
+    - speed_down_1
+    - speed_down_2
+    - speed_down_3
+    - operation_state
+  command_layout:                   # Unity → ROS 2 명령 순서
+    - run
+    - hold
+    - stop
+    - speed_down_1
+    - speed_down_2
+    - speed_down_3

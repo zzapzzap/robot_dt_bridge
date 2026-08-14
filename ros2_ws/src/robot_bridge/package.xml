@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    현대 로딩/언로딩 로봇 디지털 트윈 브리지.
+    ① Unity ↔ ROS 2 (6축 pose · 정지/감속 상태)
+    ② ROS 2 ↔ 공정 PLC (MELSEC MC 프로토콜)
+  </description>
+  <maintainer email="jhlee@sierrabase.co.kr">Sierra Base</maintainer>
+  <license>Proprietary</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>robot_bridge_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
