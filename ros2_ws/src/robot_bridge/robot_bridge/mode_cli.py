@@ -1,9 +1,9 @@
 """안전 모드 CLI — 서비스 호출을 짧게 쓰기 위한 도구.
 
-    ros2 run robot_bridge mode_cli 감속2 --reason "작업자 접근"
-    ros2 run robot_bridge mode_cli stop
-    ros2 run robot_bridge mode_cli 정상 --clear        # 정지 고정까지 해제
-    ros2 run robot_bridge mode_cli 감속3 --hold 10     # 10초만 유지
+    ros2 run robot_bridge mode_cli reduced50 --reason "작업자 접근"
+    ros2 run robot_bridge mode_cli estop
+    ros2 run robot_bridge mode_cli normal --clear      # 정지 고정까지 해제
+    ros2 run robot_bridge mode_cli rs25 --hold 10      # 10초만 유지
     ros2 run robot_bridge mode_cli --get               # 현재 모드 조회
     ros2 run robot_bridge mode_cli --watch             # 모드 변화 실시간 감시
 
@@ -24,14 +24,14 @@ from rclpy.node import Node
 from robot_bridge_msgs.msg import SafetyMode
 from robot_bridge_msgs.srv import GetSafetyMode, SetSafetyMode
 
-from .safety_gate import MODE_NAMES, mode_name, parse_mode
+from .safety_gate import MODE_LABELS, MODE_NAMES, mode_name, parse_mode
 
 
 def _fmt(state: SafetyMode) -> str:
     latch = ("무기한" if state.latched and state.latch_remaining_s <= 0
              else f"{state.latch_remaining_s:.1f}s" if state.latched else "—")
     link = "정상" if state.link_ok else "두절"
-    return (f"{state.mode_name:14s} 속도 {state.speed_ratio * 100:3.0f} %  "
+    return (f"{state.mode_name:18s} 속도 {state.speed_ratio * 100:3.0f} %  "
             f"[{state.source}] 고정 {latch}  링크 {link}"
             + (f"  · {state.reason}" if state.reason else ""))
 
@@ -61,7 +61,8 @@ class ModeCli(Node):
             return 2
         r = fut.result()
         mark = "수락" if r.accepted else "거절"
-        print(f"[{mark}] 요청 {mode_name(mode)} → 현재 {r.applied_mode_name}")
+        print(f"[{mark}] 요청 {mode_name(mode)} → 현재 {r.applied_mode_name}"
+              f"  ({r.applied_mode_label})")
         if r.message and r.message != "적용됨":
             print(f"       {r.message}")
         return 0 if r.accepted else 1
@@ -101,10 +102,14 @@ class ModeCli(Node):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="안전 모드 설정 · 조회",
-        epilog="모드 : " + " · ".join(f"{k}={v}" for k, v in MODE_NAMES.items() if k),
+        epilog=("모드 : "
+                + "  ".join(f"{k}={v}" for k, v in MODE_NAMES.items() if k)
+                + "\n이름의 숫자가 곧 결과 속도입니다 "
+                  "(REDUCED_SPEED_50 = 전속의 50 %)."),
     )
     ap.add_argument("mode", nargs="?",
-                    help="정상 | 감속1 | 감속2 | 감속3 | 일시정지 | 정지 (숫자·영문도 가능)")
+                    help="normal | rs75 | rs50 | rs25 | pstop | estop "
+                         "(한글·모드번호도 가능)")
     ap.add_argument("--robot", default="loading", help="로봇 id (기본 loading)")
     ap.add_argument("--ns", default=None, help="네임스페이스 직접 지정 (예 /robot/loading)")
     ap.add_argument("--source", default="operator")
@@ -126,7 +131,7 @@ def main(argv=None) -> int:
         m = parse_mode(a.mode)
         if m is None:
             print(f"알 수 없는 모드 : {a.mode!r}")
-            print("사용 가능 : 정상 · 감속1 · 감속2 · 감속3 · 일시정지 · 정지")
+            print("사용 가능 : normal · rs75 · rs50 · rs25 · pstop · estop")
             return 2
         return node.call_set(m, a.source, a.reason, a.hold, a.clear)
     finally:

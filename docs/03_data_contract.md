@@ -11,7 +11,7 @@ CDR 결과보고서 Ⅳ.5.자 「인터페이스 데이터요소 목록」의 IE
 |---|---|---|---|---|
 | `/robot/<id>/cmd_degs` | `std_msgs/Float64MultiArray` | 6 | **degree**, `[J1…J6]` = 로딩 `[S,H,V,R2,B,R1]` / 언로딩 `[S,L,U,R,B,T]` | 18~20 Hz |
 | `/robot/<id>/state` | `std_msgs/Int32MultiArray` | 7 | `[run, hold, estop, sd1, sd2, sd3, op_state]` | 18~20 Hz |
-| `/robot/<id>/mode_unity` | `std_msgs/Int32MultiArray` | 4 | `[모드, 속도%, 링크정상, 고정여부]` | 변화 시 + 1 Hz |
+| `/robot/<id>/mode_unity` | `std_msgs/Int32MultiArray` | 4 | `[모드, **결과속도%**, 링크정상, 고정여부]` | 변화 시 + 1 Hz |
 | `/worker/unity/bodies` | `std_msgs/Float32MultiArray` | 가변 | `[n, id0, x,y,z ×28, id1, …]` · m · `stag_marker` 기준 | 20 Hz |
 
 > **degree 로 보내는 이유** — 기존 GP8 파이프라인과 동일 계약을 유지하기 위함이다.

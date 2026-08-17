@@ -9,7 +9,7 @@ namespace SierraBase.RobotDT
     ///
     /// 발행된 명령은 ROS 2 쪽 unity_adapter → safety_gate 를 거쳐 중재된 뒤
     /// PLC 버퍼(D2000 / D3000)에 기록된다. Unity 명령의 우선순위는 0 이므로
-    /// XDI(정지) · XAG(감속) 지령을 덮어쓰지 못한다 — 안전상 의도된 설계다.
+    /// XDI(정지) · XAG(속도제한) 지령을 덮어쓰지 못한다 — 안전상 의도된 설계다.
     ///
     /// 검증용 GUI 는 OnGUI 로 그린다(캔버스 셋업 불필요).
     /// </summary>
@@ -66,7 +66,7 @@ namespace SierraBase.RobotDT
             Publish();
         }
 
-        /// <summary>긴급 계열(run/hold/stop)은 서로 배타적으로 세운다.</summary>
+        /// <summary>정지 계열(normal/protective/emergency)은 서로 배타적으로 세운다.</summary>
         public void SetUrgent(int idx, string label)
         {
             _cmd[DtBridgeConfig.CmdIdx.Run] = 0;
@@ -77,7 +77,7 @@ namespace SierraBase.RobotDT
             Publish();
         }
 
-        /// <summary>감속 계열(1/2/3)도 서로 배타적이다.</summary>
+        /// <summary>속도제한 계열(75/50/25 %)도 서로 배타적이다.</summary>
         public void SetSlowdown(int idx, string label)
         {
             _cmd[DtBridgeConfig.CmdIdx.SpeedDown1] = 0;
@@ -88,12 +88,12 @@ namespace SierraBase.RobotDT
             Publish();
         }
 
-        public void SendRun() => SetUrgent(DtBridgeConfig.CmdIdx.Run, "운전");
-        public void SendHold() => SetUrgent(DtBridgeConfig.CmdIdx.Hold, "일시정지");
-        public void SendStop() => SetUrgent(DtBridgeConfig.CmdIdx.Stop, "비상정지");
-        public void SendSlow1() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown1, "감속 1 (25 % 감속)");
-        public void SendSlow2() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown2, "감속 2 (50 % 감속)");
-        public void SendSlow3() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown3, "감속 3 (75 % 감속)");
+        public void SendNormal() => SetUrgent(DtBridgeConfig.CmdIdx.Run, "NORMAL");
+        public void SendProtectiveStop() => SetUrgent(DtBridgeConfig.CmdIdx.Hold, "PROTECTIVE_STOP");
+        public void SendEmergencyStop() => SetUrgent(DtBridgeConfig.CmdIdx.Stop, "EMERGENCY_STOP");
+        public void SendReduced75() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown1, "REDUCED_SPEED_75");
+        public void SendReduced50() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown2, "REDUCED_SPEED_50");
+        public void SendReduced25() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown3, "REDUCED_SPEED_25");
 
         // ---------------------------------------------------------- 검증 GUI
         void OnGUI()
@@ -103,13 +103,13 @@ namespace SierraBase.RobotDT
             GUILayout.BeginArea(new Rect(12, 12, W, 330), GUI.skin.box);
             GUILayout.Label($"<b>제어 명령 → {config.robotId}</b>");
             GUILayout.Space(4);
-            if (GUILayout.Button("운전", GUILayout.Height(H))) SendRun();
-            if (GUILayout.Button("일시정지 (Hold)", GUILayout.Height(H))) SendHold();
-            if (GUILayout.Button("비상정지 (Stop)", GUILayout.Height(H))) SendStop();
+            if (GUILayout.Button("정상 운전 · 전속", GUILayout.Height(H))) SendNormal();
+            if (GUILayout.Button("보호정지 (전원 유지)", GUILayout.Height(H))) SendProtectiveStop();
+            if (GUILayout.Button("비상정지", GUILayout.Height(H))) SendEmergencyStop();
             GUILayout.Space(6);
-            if (GUILayout.Button("감속 1 · 25 % 감속", GUILayout.Height(H))) SendSlow1();
-            if (GUILayout.Button("감속 2 · 50 % 감속", GUILayout.Height(H))) SendSlow2();
-            if (GUILayout.Button("감속 3 · 75 % 감속", GUILayout.Height(H))) SendSlow3();
+            if (GUILayout.Button("속도제한 75 %", GUILayout.Height(H))) SendReduced75();
+            if (GUILayout.Button("속도제한 50 %", GUILayout.Height(H))) SendReduced50();
+            if (GUILayout.Button("속도제한 25 %", GUILayout.Height(H))) SendReduced25();
             GUILayout.Space(6);
             if (GUILayout.Button("전체 해제", GUILayout.Height(H))) Clear();
             GUILayout.Space(4);

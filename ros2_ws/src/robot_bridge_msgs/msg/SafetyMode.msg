@@ -1,20 +1,26 @@
-# 안전 운전 모드 — 정상운영 / 감속 3단 / 일시정지 / 비상정지 를 하나의 값으로 표현.
+# 안전 운전 모드.
+#
+# 이름에 결과 속도를 그대로 박아 넣는다 — REDUCED_SPEED_50 = 전속의 50 % 로 운전.
+# 「감속 N」 표기는 감속률/잔여속도가 갈려 정반대 해석이 가능하므로 쓰지 않는다.
+# 정지 용어는 ISO 10218 / ISO-TS 15066 을 따른다.
+#
 # 토픽 /robot/<id>/mode 로 상시 방송되고, 서비스로 설정·조회할 수 있다.
 
-uint8 MODE_UNKNOWN = 0
-uint8 MODE_RUN     = 1    # 정상 운영        속도 100 %
-uint8 MODE_SLOW_1  = 2    # 감속 1 (25 % 감속)  속도  75 %
-uint8 MODE_SLOW_2  = 3    # 감속 2 (50 % 감속)  속도  50 %
-uint8 MODE_SLOW_3  = 4    # 감속 3 (75 % 감속)  속도  25 %
-uint8 MODE_HOLD    = 5    # 일시정지 (Hold)  속도   0 %  — 전원 유지
-uint8 MODE_STOP    = 6    # 비상정지         속도   0 %  — 즉시 정지
+uint8 MODE_UNKNOWN         = 0
+uint8 MODE_NORMAL          = 1    # 정상 운전 · 전속       속도 100 %
+uint8 MODE_REDUCED_75      = 2    # 속도제한 75 %          속도  75 %   ← PLC speed_down_1
+uint8 MODE_REDUCED_50      = 3    # 속도제한 50 %          속도  50 %   ← PLC speed_down_2
+uint8 MODE_REDUCED_25      = 4    # 속도제한 25 %          속도  25 %   ← PLC speed_down_3
+uint8 MODE_PROTECTIVE_STOP = 5    # 보호정지 — 전원 유지    속도   0 %   ← PLC hold
+uint8 MODE_EMERGENCY_STOP  = 6    # 비상정지               속도   0 %   ← PLC stop
 
 std_msgs/Header header
 
 uint8 mode
-string mode_name          # "정상 운영" · "감속 2 (50 % 감속)" · "비상정지" …
-# 주의 : mode_name 의 % 는 감속률, speed_ratio 는 실제 속도 배율이다.
-float32 speed_ratio       # 1.0 / 0.75 / 0.5 / 0.25 / 0.0
+string mode_name          # 정규 식별자 : "REDUCED_SPEED_50" · "EMERGENCY_STOP" …
+string mode_label         # 사람이 읽는 라벨 : "속도제한 50 %" · "비상정지" …
+float32 speed_ratio       # 전속 대비 속도 배율 — 1.0 / 0.75 / 0.5 / 0.25 / 0.0
+                          # 기계 판독은 항상 이 값을 쓴다 (이름 문자열 파싱 금지)
 
 string source             # 이 모드를 만든 주체 : xdi | xag | unity | operator | watchdog
 string reason             # 근거 (XAI 설명 요약 등)

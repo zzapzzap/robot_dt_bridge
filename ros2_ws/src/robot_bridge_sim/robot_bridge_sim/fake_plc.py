@@ -124,7 +124,7 @@ class Handler(socketserver.BaseRequestHandler):
                 return self._reply(0xC058)
             vals = struct.unpack(f"<{count}H", req[6:need])
             MEM.write(code, addr, vals)
-            tag = {2000: "긴급", 3000: "감속"}.get(addr, f"D{addr}")
+            tag = {2000: "정지버퍼", 3000: "속도제한버퍼"}.get(addr, f"D{addr}")
             print(f"[fake-plc] write {tag} ← {list(vals)}")
             return self._reply(0x0000)
 

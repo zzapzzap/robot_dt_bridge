@@ -1,7 +1,7 @@
 """메신저 ② — PLC ↔ ROS 2.
 
 읽기 : D1000~D1013 을 주기 폴링해 RobotMemory / RobotPose 를 발행한다.
-쓰기 : RobotCommand 를 구독해 버퍼1(긴급) · 버퍼2(감속) 워드를 기록한다.
+쓰기 : RobotCommand 를 구독해 버퍼1(정지) · 버퍼2(속도제한) 워드를 기록한다.
 
 별첨자료 `robotpose_python.py` 의 골격을 유지하되, TODO 로 비어 있던
 `RobotMemoryClient` 자리를 실제 MC 프로토콜 구현(mc_client)으로 채웠다.
@@ -24,7 +24,7 @@ from robot_bridge_msgs.srv import GetSafetyMode, SetSafetyMode
 
 from .config_loader import BridgeConfig
 from .mc_client import McClient, McConfig, McError, bit_of, words_to_dword
-from .safety_gate import SafetyGate, mode_name, speed_ratio
+from .safety_gate import SafetyGate, mode_label, mode_name
 
 SENSOR_QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE,
@@ -191,12 +191,14 @@ class RobotMemoryNode(Node):
         res.accepted = ok
         res.applied_mode = applied.mode
         res.applied_mode_name = applied.mode_name
+        res.applied_mode_label = applied.mode_label
         res.message = message
         self.publish_mode(force=True)
         self.push_command()                      # 즉시 PLC 에 반영
         self.get_logger().info(
             f"set_mode({mode_name(int(req.mode))}) ← {req.source or 'service'} "
-            f"→ {'수락' if ok else '거절'} · 현재 {applied.mode_name}")
+            f"→ {'수락' if ok else '거절'} · 현재 {applied.mode_name} "
+            f"({applied.mode_label})")
         return res
 
     def on_get_mode(self, _req, res):
@@ -216,6 +218,7 @@ class RobotMemoryNode(Node):
         m.header.frame_id = self.robot.id
         m.mode = a.mode
         m.mode_name = a.mode_name
+        m.mode_label = a.mode_label
         m.speed_ratio = float(a.speed_ratio)
         m.source = a.source
         m.reason = a.reason

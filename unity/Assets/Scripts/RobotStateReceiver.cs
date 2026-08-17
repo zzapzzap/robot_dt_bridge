@@ -6,11 +6,25 @@ namespace SierraBase.RobotDT
 {
     /// <summary>
     /// 메신저 ① 상태 수신부 — /robot/&lt;id&gt;/state (Int32MultiArray[7]) 구독.
-    /// 정지 · 일시정지 · 감속 1/2/3 을 로봇 색상과 경광등으로 표현한다.
+    /// 정지 · 속도제한 상태를 로봇 색상과 경광등으로 표현한다.
     /// </summary>
     public class RobotStateReceiver : MonoBehaviour
     {
-        public enum SafetyLevel { Run, SlowDown1, SlowDown2, SlowDown3, Hold, Stop, Unknown }
+        /// <summary>
+        /// PLC 가 보고한 상태. 이름의 숫자가 곧 결과 속도다
+        /// (ReducedSpeed50 = 전속의 50 %). 「감속 N」 표기는 감속률/잔여속도가
+        /// 갈려 정반대로 읽히므로 쓰지 않는다.
+        /// </summary>
+        public enum SafetyLevel
+        {
+            Normal,           // 전속 100 %
+            ReducedSpeed75,   // 75 %   ← PLC speed_down_1 (25 % 감속)
+            ReducedSpeed50,   // 50 %   ← PLC speed_down_2
+            ReducedSpeed25,   // 25 %   ← PLC speed_down_3 (75 % 감속)
+            ProtectiveStop,   // 보호정지 — 전원 유지
+            EmergencyStop,    // 비상정지
+            Unknown
+        }
 
         [Header("설정")]
         public DtBridgeConfig config;
@@ -25,13 +39,13 @@ namespace SierraBase.RobotDT
         [Tooltip("상태 텍스트를 표시할 TextMesh (없으면 무시)")]
         public TextMesh statusLabel;
 
-        [Header("상태별 색")]
-        public Color runColor = new Color(0.20f, 0.70f, 0.45f);
-        public Color slow1Color = new Color(0.95f, 0.85f, 0.25f);
-        public Color slow2Color = new Color(0.98f, 0.65f, 0.15f);
-        public Color slow3Color = new Color(0.95f, 0.45f, 0.10f);
-        public Color holdColor = new Color(0.85f, 0.25f, 0.20f);
-        public Color stopColor = new Color(0.75f, 0.10f, 0.10f);
+        [Header("상태별 색 — 속도가 낮을수록 붉어진다")]
+        public Color normalColor = new Color(0.20f, 0.70f, 0.45f);
+        public Color reduced75Color = new Color(0.95f, 0.85f, 0.25f);
+        public Color reduced50Color = new Color(0.98f, 0.65f, 0.15f);
+        public Color reduced25Color = new Color(0.95f, 0.45f, 0.10f);
+        public Color protectiveStopColor = new Color(0.85f, 0.25f, 0.20f);
+        public Color emergencyStopColor = new Color(0.75f, 0.10f, 0.10f);
         public Color staleColor = new Color(0.55f, 0.55f, 0.58f);
 
         [Header("상태 (읽기 전용)")]
@@ -74,12 +88,12 @@ namespace SierraBase.RobotDT
             var d = msg.data;
             if (d == null || d.Length < DtBridgeConfig.StateIdx.Length) return;
 
-            if (d[DtBridgeConfig.StateIdx.EmergencyStop] != 0) level = SafetyLevel.Stop;
-            else if (d[DtBridgeConfig.StateIdx.Hold] != 0) level = SafetyLevel.Hold;
-            else if (d[DtBridgeConfig.StateIdx.SpeedDown3] != 0) level = SafetyLevel.SlowDown3;
-            else if (d[DtBridgeConfig.StateIdx.SpeedDown2] != 0) level = SafetyLevel.SlowDown2;
-            else if (d[DtBridgeConfig.StateIdx.SpeedDown1] != 0) level = SafetyLevel.SlowDown1;
-            else level = SafetyLevel.Run;
+            if (d[DtBridgeConfig.StateIdx.EmergencyStop] != 0) level = SafetyLevel.EmergencyStop;
+            else if (d[DtBridgeConfig.StateIdx.Hold] != 0) level = SafetyLevel.ProtectiveStop;
+            else if (d[DtBridgeConfig.StateIdx.SpeedDown3] != 0) level = SafetyLevel.ReducedSpeed25;
+            else if (d[DtBridgeConfig.StateIdx.SpeedDown2] != 0) level = SafetyLevel.ReducedSpeed50;
+            else if (d[DtBridgeConfig.StateIdx.SpeedDown1] != 0) level = SafetyLevel.ReducedSpeed75;
+            else level = SafetyLevel.Normal;
 
             operationState = d[DtBridgeConfig.StateIdx.OperationState];
             _lastRecv = Time.time;
@@ -93,16 +107,29 @@ namespace SierraBase.RobotDT
             commandMode = d[0];
             commandSpeedPct = d[1];
             commandLatched = d[3] != 0;
-            commandModeName = ModeName(commandMode);
+            commandModeName = ModeLabel(commandMode);
         }
 
+        /// <summary>모드 값 → 정규 식별자 (safety_gate.MODE_NAMES 와 동일).</summary>
         public static string ModeName(int mode) => mode switch
         {
-            1 => "정상 운영",
-            2 => "감속 1 (25 % 감속)",
-            3 => "감속 2 (50 % 감속)",
-            4 => "감속 3 (75 % 감속)",
-            5 => "일시정지",
+            1 => "NORMAL",
+            2 => "REDUCED_SPEED_75",
+            3 => "REDUCED_SPEED_50",
+            4 => "REDUCED_SPEED_25",
+            5 => "PROTECTIVE_STOP",
+            6 => "EMERGENCY_STOP",
+            _ => "UNKNOWN",
+        };
+
+        /// <summary>모드 값 → 한글 라벨 (화면 표시용).</summary>
+        public static string ModeLabel(int mode) => mode switch
+        {
+            1 => "정상 운전 · 전속",
+            2 => "속도제한 75 %",
+            3 => "속도제한 50 %",
+            4 => "속도제한 25 %",
+            5 => "보호정지",
             6 => "비상정지",
             _ => "—",
         };
@@ -131,7 +158,8 @@ namespace SierraBase.RobotDT
             if (beacon != null)
             {
                 beacon.color = c;
-                bool blink = level == SafetyLevel.Stop || level == SafetyLevel.Hold;
+                bool blink = level == SafetyLevel.EmergencyStop
+                             || level == SafetyLevel.ProtectiveStop;
                 beacon.intensity = !linkAlive ? 0.3f
                     : blink ? (Mathf.PingPong(Time.time * 4f, 1f) * 3f + 0.5f)
                     : 1.5f;
@@ -150,23 +178,23 @@ namespace SierraBase.RobotDT
 
         Color ColorOf(SafetyLevel l) => l switch
         {
-            SafetyLevel.Run => runColor,
-            SafetyLevel.SlowDown1 => slow1Color,
-            SafetyLevel.SlowDown2 => slow2Color,
-            SafetyLevel.SlowDown3 => slow3Color,
-            SafetyLevel.Hold => holdColor,
-            SafetyLevel.Stop => stopColor,
+            SafetyLevel.Normal => normalColor,
+            SafetyLevel.ReducedSpeed75 => reduced75Color,
+            SafetyLevel.ReducedSpeed50 => reduced50Color,
+            SafetyLevel.ReducedSpeed25 => reduced25Color,
+            SafetyLevel.ProtectiveStop => protectiveStopColor,
+            SafetyLevel.EmergencyStop => emergencyStopColor,
             _ => staleColor,
         };
 
         static string LabelOf(SafetyLevel l) => l switch
         {
-            SafetyLevel.Run => "운전",
-            SafetyLevel.SlowDown1 => "감속 1 (25 % 감속)",
-            SafetyLevel.SlowDown2 => "감속 2 (50 % 감속)",
-            SafetyLevel.SlowDown3 => "감속 3 (75 % 감속)",
-            SafetyLevel.Hold => "일시정지",
-            SafetyLevel.Stop => "비상정지",
+            SafetyLevel.Normal => "정상 운전 · 전속",
+            SafetyLevel.ReducedSpeed75 => "속도제한 75 %",
+            SafetyLevel.ReducedSpeed50 => "속도제한 50 %",
+            SafetyLevel.ReducedSpeed25 => "속도제한 25 %",
+            SafetyLevel.ProtectiveStop => "보호정지",
+            SafetyLevel.EmergencyStop => "비상정지",
             _ => "—",
         };
     }

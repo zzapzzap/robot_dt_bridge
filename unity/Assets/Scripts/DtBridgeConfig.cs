@@ -46,9 +46,9 @@ namespace SierraBase.RobotDT
             public const int Run = 0;
             public const int Hold = 1;
             public const int EmergencyStop = 2;
-            public const int SpeedDown1 = 3;
-            public const int SpeedDown2 = 4;
-            public const int SpeedDown3 = 5;
+            public const int SpeedDown1 = 3;   // 25 % 감속 → 속도 75 %
+            public const int SpeedDown2 = 4;   // 50 % 감속 → 속도 50 %
+            public const int SpeedDown3 = 5;   // 75 % 감속 → 속도 25 %
             public const int OperationState = 6;
             public const int Length = 7;
         }
@@ -59,9 +59,9 @@ namespace SierraBase.RobotDT
             public const int Run = 0;
             public const int Hold = 1;
             public const int Stop = 2;
-            public const int SpeedDown1 = 3;
-            public const int SpeedDown2 = 4;
-            public const int SpeedDown3 = 5;
+            public const int SpeedDown1 = 3;   // 속도 75 %
+            public const int SpeedDown2 = 4;   // 속도 50 %
+            public const int SpeedDown3 = 5;   // 속도 25 %
             public const int Length = 6;
         }
     }

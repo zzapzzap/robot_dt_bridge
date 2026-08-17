@@ -29,9 +29,9 @@ ros2 topic hz   /robot/loading/cmd_degs      # ≈ 20 Hz
 ros2 topic echo /robot/loading/state         # [run,hold,estop,sd1,sd2,sd3,op]
 ros2 topic echo /worker/unity/bodies --once  # [n, id, x,y,z ×28, …]
 
-# 안전 모드 — 정상 운영 / 감속 3단 / 일시정지 / 비상정지
+# 안전 모드 — NORMAL / REDUCED_SPEED_75·50·25 / PROTECTIVE_STOP / EMERGENCY_STOP
 ros2 run robot_bridge mode_cli --get         # 현재 모드
-ros2 run robot_bridge mode_cli 감속2          # 설정
+ros2 run robot_bridge mode_cli rs50          # 속도제한 50 % 로 설정
 ros2 run robot_bridge mode_cli --watch       # 변화 감시
 ```
 
@@ -74,7 +74,7 @@ robot_dt_bridge/
 │   ├── robot_bridge/
 │   │   ├── mc_client.py          MC 3E/4E 바이너리 (표준 라이브러리만)
 │   │   ├── config_loader.py      yaml → 설정 객체 · raw→degree 변환
-│   │   ├── safety_gate.py        XDI↔XAG 명령 중재 · 모드 관리 (AI-102)
+│   │   ├── safety_gate.py        XDI↔XAG 명령 중재 · 안전 모드 (AI-102)
 │   │   ├── mode_cli.py           모드 설정 · 조회 CLI
 │   │   ├── robot_memory_node.py  ★ 메신저 ②
 │   │   └── unity_adapter_node.py ★ 메신저 ①
@@ -82,6 +82,20 @@ robot_dt_bridge/
 ├── unity/Assets/Scripts/     C# 6종 (씬 파일 없음 — 코드로 구성)
 ├── tools/plc_probe.py        접속 진단 CLI
 └── docs/                     구조 · PLC 설정 · 데이터 계약 · 캘리브레이션 · 안전 모드
+```
+
+### 안전 모드 명칭
+
+이름에 **결과 속도**를 박아 넣어 해석의 여지를 없앴다.
+
+```
+REDUCED_SPEED_50   =  전속의 50 % 로 운전
+```
+
+「감속 N」 표기는 감속률인지 잔여속도인지 갈려 실제로 정반대 값이 돌아다녔다.
+PLC 필드 `speed_down_N` 은 사양서 계약이라 유지하고, 뒤집는 지점은 `MODE_FIELD` 표 하나뿐이다.
+상세는 `docs/05_modes.md`.
+
 ```
 
 ---
