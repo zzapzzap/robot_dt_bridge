@@ -11,6 +11,7 @@ CDR 결과보고서 Ⅳ.5.자 「인터페이스 데이터요소 목록」의 IE
 |---|---|---|---|---|
 | `/robot/<id>/cmd_degs` | `std_msgs/Float64MultiArray` | 6 | **degree**, `[J1…J6]` = 로딩 `[S,H,V,R2,B,R1]` / 언로딩 `[S,L,U,R,B,T]` | 18~20 Hz |
 | `/robot/<id>/state` | `std_msgs/Int32MultiArray` | 7 | `[run, hold, estop, sd1, sd2, sd3, op_state]` | 18~20 Hz |
+| `/robot/<id>/mode_unity` | `std_msgs/Int32MultiArray` | 4 | `[모드, 속도%, 링크정상, 고정여부]` | 변화 시 + 1 Hz |
 | `/worker/unity/bodies` | `std_msgs/Float32MultiArray` | 가변 | `[n, id0, x,y,z ×28, id1, …]` · m · `stag_marker` 기준 | 20 Hz |
 
 > **degree 로 보내는 이유** — 기존 GP8 파이프라인과 동일 계약을 유지하기 위함이다.
@@ -32,6 +33,16 @@ Unity 명령의 우선순위는 **0** 이다. XDI(정지 100) · XAG(감속 20~6
 | `/robot/<id>/memory` | `robot_bridge_msgs/RobotMemory` | PLC 원시값 · 통신 품질 (기록 · 진단) |
 | `/robot/<id>/cmd_degs_raw` | `robot_bridge_msgs/RobotPose` | 변환 결과 + 원시값 + 교정 여부 |
 | `/robot/<id>/command` | `robot_bridge_msgs/RobotCommand` | XDI · XAG · Unity 가 발행하는 제어 명령 |
+| `/robot/<id>/mode` | `robot_bridge_msgs/SafetyMode` | 중재 결과 모드 방송 (변화 시 즉시 + 1 Hz) |
+
+## 3.1 서비스
+
+| 서비스 | 타입 | 용도 |
+|---|---|---|
+| `/robot/<id>/set_mode` | `robot_bridge_msgs/srv/SetSafetyMode` | 모드 설정 (고정 · 시한부 · 강제해제) |
+| `/robot/<id>/get_mode` | `robot_bridge_msgs/srv/GetSafetyMode` | 현재 모드 조회 |
+
+상세는 `docs/05_modes.md`.
 
 ## 4. 왜 std_msgs 로 한 번 더 변환하나
 

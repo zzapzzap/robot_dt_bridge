@@ -1,0 +1,5 @@
+# 현재 안전 모드 조회.
+#
+#   ros2 service call /robot/loading/get_mode robot_bridge_msgs/srv/GetSafetyMode "{}"
+---
+robot_bridge_msgs/SafetyMode state

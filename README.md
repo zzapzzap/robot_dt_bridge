@@ -28,6 +28,11 @@ ros2 launch robot_bridge bringup.launch.py profile:=sim
 ros2 topic hz   /robot/loading/cmd_degs      # ≈ 20 Hz
 ros2 topic echo /robot/loading/state         # [run,hold,estop,sd1,sd2,sd3,op]
 ros2 topic echo /worker/unity/bodies --once  # [n, id, x,y,z ×28, …]
+
+# 안전 모드 — 정상 운영 / 감속 3단 / 일시정지 / 비상정지
+ros2 run robot_bridge mode_cli --get         # 현재 모드
+ros2 run robot_bridge mode_cli 감속2          # 설정
+ros2 run robot_bridge mode_cli --watch       # 변화 감시
 ```
 
 Unity 는 빈 씬에 `DtSceneBootstrap` 하나만 붙이고 재생하면 된다.
@@ -64,17 +69,19 @@ robot_dt_bridge/
 │   ├── robots.yaml       로봇 정의 · scale/dir/offset · 토픽
 │   └── network.yaml      IP · 게이트웨이 · 포트 · 점검 순서
 ├── ros2_ws/src/
-│   ├── robot_bridge_msgs/    RobotMemory · RobotCommand · RobotPose
+│   ├── robot_bridge_msgs/    RobotMemory · RobotCommand · RobotPose · SafetyMode
+│   │                         srv : SetSafetyMode · GetSafetyMode
 │   ├── robot_bridge/
 │   │   ├── mc_client.py          MC 3E/4E 바이너리 (표준 라이브러리만)
 │   │   ├── config_loader.py      yaml → 설정 객체 · raw→degree 변환
-│   │   ├── safety_gate.py        XDI↔XAG 명령 중재 (AI-102)
+│   │   ├── safety_gate.py        XDI↔XAG 명령 중재 · 모드 관리 (AI-102)
+│   │   ├── mode_cli.py           모드 설정 · 조회 CLI
 │   │   ├── robot_memory_node.py  ★ 메신저 ②
 │   │   └── unity_adapter_node.py ★ 메신저 ①
 │   └── robot_bridge_sim/     가상 PLC · 작업자 더미
 ├── unity/Assets/Scripts/     C# 6종 (씬 파일 없음 — 코드로 구성)
 ├── tools/plc_probe.py        접속 진단 CLI
-└── docs/                     구조 · PLC 설정 · 데이터 계약 · 캘리브레이션
+└── docs/                     구조 · PLC 설정 · 데이터 계약 · 캘리브레이션 · 안전 모드
 ```
 
 ---

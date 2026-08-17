@@ -27,7 +27,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import PoseArray
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int32MultiArray
 
-from robot_bridge_msgs.msg import RobotCommand, RobotMemory, RobotPose
+from robot_bridge_msgs.msg import RobotCommand, RobotMemory, RobotPose, SafetyMode
 
 from .config_loader import BridgeConfig
 
@@ -60,6 +60,8 @@ class UnityAdapterNode(Node):
             t = r.topics
             pose_pub = self.create_publisher(Float64MultiArray, t["pose"], QOS)
             state_pub = self.create_publisher(Int32MultiArray, t["state"], QOS)
+            ns = t["memory"].rsplit("/", 1)[0]
+            mode_pub = self.create_publisher(Int32MultiArray, ns + "/mode_unity", QOS)
             self.pub_cmd[r.id] = self.create_publisher(RobotCommand, t["command"], 10)
 
             self.create_subscription(
@@ -69,7 +71,10 @@ class UnityAdapterNode(Node):
                 RobotMemory, t["memory"],
                 lambda m, p=state_pub: self.on_memory(m, p), QOS)
             self.create_subscription(
-                Int32MultiArray, t["pose"].rsplit("/", 1)[0] + "/unity_command",
+                SafetyMode, ns + "/mode",
+                lambda m, p=mode_pub: self.on_mode(m, p), QOS)
+            self.create_subscription(
+                Int32MultiArray, ns + "/unity_command",
                 lambda m, rid=r.id: self.on_unity_command(m, rid), 10)
             self.get_logger().info(f"어댑터 등록 : {r.id} → {t['pose']} / {t['state']}")
 
@@ -94,6 +99,13 @@ class UnityAdapterNode(Node):
     def on_pose(self, msg: RobotPose, pub) -> None:
         out = Float64MultiArray()
         out.data = list(msg.degrees)
+        pub.publish(out)
+
+    def on_mode(self, msg: SafetyMode, pub) -> None:
+        """SafetyMode → Int32MultiArray[4] = [모드, 속도%, 링크정상, 고정여부]."""
+        out = Int32MultiArray()
+        out.data = [int(msg.mode), int(round(msg.speed_ratio * 100)),
+                    int(msg.link_ok), int(msg.latched)]
         pub.publish(out)
 
     def on_memory(self, msg: RobotMemory, pub) -> None:

@@ -13,7 +13,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotMemory.msg"
   "msg/RobotCommand.msg"
   "msg/RobotPose.msg"
-  DEPENDENCIES std_msgs
+  "msg/SafetyMode.msg"
+  "srv/SetSafetyMode.srv"
+  "srv/GetSafetyMode.srv"
+  DEPENDENCIES std_msgs builtin_interfaces
 )
 
 ament_export_dependencies(rosidl_default_runtime)

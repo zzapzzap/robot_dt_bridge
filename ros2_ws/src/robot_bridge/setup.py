@@ -27,6 +27,7 @@ setup(
         "console_scripts": [
             "robot_memory_node = robot_bridge.robot_memory_node:main",
             "unity_adapter_node = robot_bridge.unity_adapter_node:main",
+            "mode_cli = robot_bridge.mode_cli:main",
         ],
     },
 )

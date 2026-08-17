@@ -91,9 +91,9 @@ namespace SierraBase.RobotDT
         public void SendRun() => SetUrgent(DtBridgeConfig.CmdIdx.Run, "운전");
         public void SendHold() => SetUrgent(DtBridgeConfig.CmdIdx.Hold, "일시정지");
         public void SendStop() => SetUrgent(DtBridgeConfig.CmdIdx.Stop, "비상정지");
-        public void SendSlow1() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown1, "감속 1 (25 %)");
-        public void SendSlow2() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown2, "감속 2 (50 %)");
-        public void SendSlow3() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown3, "감속 3 (75 %)");
+        public void SendSlow1() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown1, "감속 1 (25 % 감속)");
+        public void SendSlow2() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown2, "감속 2 (50 % 감속)");
+        public void SendSlow3() => SetSlowdown(DtBridgeConfig.CmdIdx.SpeedDown3, "감속 3 (75 % 감속)");
 
         // ---------------------------------------------------------- 검증 GUI
         void OnGUI()
@@ -107,9 +107,9 @@ namespace SierraBase.RobotDT
             if (GUILayout.Button("일시정지 (Hold)", GUILayout.Height(H))) SendHold();
             if (GUILayout.Button("비상정지 (Stop)", GUILayout.Height(H))) SendStop();
             GUILayout.Space(6);
-            if (GUILayout.Button("감속 1 · 25 %", GUILayout.Height(H))) SendSlow1();
-            if (GUILayout.Button("감속 2 · 50 %", GUILayout.Height(H))) SendSlow2();
-            if (GUILayout.Button("감속 3 · 75 %", GUILayout.Height(H))) SendSlow3();
+            if (GUILayout.Button("감속 1 · 25 % 감속", GUILayout.Height(H))) SendSlow1();
+            if (GUILayout.Button("감속 2 · 50 % 감속", GUILayout.Height(H))) SendSlow2();
+            if (GUILayout.Button("감속 3 · 75 % 감속", GUILayout.Height(H))) SendSlow3();
             GUILayout.Space(6);
             if (GUILayout.Button("전체 해제", GUILayout.Height(H))) Clear();
             GUILayout.Space(4);

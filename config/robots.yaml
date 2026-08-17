@@ -26,6 +26,7 @@ robots:
       pose:    "/robot/loading/cmd_degs"
       state:   "/robot/loading/state"
       command: "/robot/loading/command"
+      mode:    "/robot/loading/mode"
 
   - id: unloading
     label: "현대 언로딩 로봇 (HH050)"
@@ -44,6 +45,7 @@ robots:
       pose:    "/robot/unloading/cmd_degs"
       state:   "/robot/unloading/state"
       command: "/robot/unloading/command"
+      mode:    "/robot/unloading/mode"
 
 # ============================================================================
 #  작업자 (사람 pose) — MVP 융합 결과를 그대로 구독

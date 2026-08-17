@@ -19,11 +19,12 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
-from robot_bridge_msgs.msg import RobotCommand, RobotMemory, RobotPose
+from robot_bridge_msgs.msg import RobotCommand, RobotMemory, RobotPose, SafetyMode
+from robot_bridge_msgs.srv import GetSafetyMode, SetSafetyMode
 
 from .config_loader import BridgeConfig
 from .mc_client import McClient, McConfig, McError, bit_of, words_to_dword
-from .safety_gate import SafetyGate
+from .safety_gate import SafetyGate, mode_name, speed_ratio
 
 SENSOR_QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE,
@@ -64,6 +65,21 @@ class RobotMemoryNode(Node):
         self.sub_cmd = self.create_subscription(
             RobotCommand, t["command"], self.on_command, 10
         )
+
+        # 모드 방송 — 지령이 바뀌면 즉시, 그 외에는 1 Hz 로 유지 신호
+        mode_topic = t.get("mode", t["memory"].rsplit("/", 1)[0] + "/mode")
+        self.pub_mode = self.create_publisher(SafetyMode, mode_topic, SENSOR_QOS)
+
+        # 모드 서비스 — 설정 / 조회
+        ns = t["memory"].rsplit("/", 1)[0]
+        self.srv_set = self.create_service(
+            SetSafetyMode, ns + "/set_mode", self.on_set_mode)
+        self.srv_get = self.create_service(
+            GetSafetyMode, ns + "/get_mode", self.on_get_mode)
+        self.get_logger().info(
+            f"모드 서비스 : {ns}/set_mode · {ns}/get_mode   방송 : {mode_topic}")
+        self._last_mode_pub = 0.0
+        self._last_mode = -1
 
         self.seq = 0
         self.last_ok: Optional[float] = None
@@ -162,14 +178,70 @@ class RobotMemoryNode(Node):
     def on_command(self, msg: RobotCommand) -> None:
         self.gate.submit(msg)
 
+    # ---------------------------------------------------------------- 서비스
+    def on_set_mode(self, req, res):
+        ok, message = self.gate.set_mode(
+            int(req.mode),
+            source=req.source or "service",
+            reason=req.reason,
+            hold_seconds=float(req.hold_seconds),
+            clear_latched=bool(req.clear_latched),
+        )
+        applied = self.gate.resolve(link_stale=self._link_stale())
+        res.accepted = ok
+        res.applied_mode = applied.mode
+        res.applied_mode_name = applied.mode_name
+        res.message = message
+        self.publish_mode(force=True)
+        self.push_command()                      # 즉시 PLC 에 반영
+        self.get_logger().info(
+            f"set_mode({mode_name(int(req.mode))}) ← {req.source or 'service'} "
+            f"→ {'수락' if ok else '거절'} · 현재 {applied.mode_name}")
+        return res
+
+    def on_get_mode(self, _req, res):
+        res.state = self.build_mode_msg()
+        return res
+
+    # ------------------------------------------------------------- 모드 방송
+    def _link_stale(self) -> bool:
+        return (self.last_ok is None
+                or (time.time() - self.last_ok) * 1000.0
+                > self.cfg.safety.get("watchdog_timeout_ms", 500))
+
+    def build_mode_msg(self) -> SafetyMode:
+        a = self.gate.last_applied()
+        m = SafetyMode()
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = self.robot.id
+        m.mode = a.mode
+        m.mode_name = a.mode_name
+        m.speed_ratio = float(a.speed_ratio)
+        m.source = a.source
+        m.reason = a.reason
+        m.priority = int(min(a.priority, 255))
+        m.latched = bool(a.latched)
+        m.latch_remaining_s = float(a.latch_remaining_s)
+        m.link_ok = not self._link_stale()
+        since = self.gate.mode_since()
+        m.since.sec = int(since)
+        m.since.nanosec = int((since - int(since)) * 1e9)
+        return m
+
+    def publish_mode(self, force: bool = False) -> None:
+        now = time.time()
+        cur = self.gate.mode()
+        if force or cur != self._last_mode or (now - self._last_mode_pub) >= 1.0:
+            self.pub_mode.publish(self.build_mode_msg())
+            self._last_mode = cur
+            self._last_mode_pub = now
+
     def push_command(self) -> None:
         """중재된 최종 지령을 PLC 버퍼에 기록한다 (워치독 겸용 주기 재기록)."""
         if not self.client.connected:
             return
-        stale = (self.last_ok is None
-                 or (time.time() - self.last_ok) * 1000.0
-                 > self.cfg.safety.get("watchdog_timeout_ms", 500))
-        applied = self.gate.resolve(link_stale=stale)
+        applied = self.gate.resolve(link_stale=self._link_stale())
+        self.publish_mode()
 
         blocks = self.cfg.write_blocks
         try:

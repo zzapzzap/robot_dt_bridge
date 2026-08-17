@@ -1,0 +1,18 @@
+# 안전 모드 설정.
+#
+#   ros2 service call /robot/loading/set_mode robot_bridge_msgs/srv/SetSafetyMode \
+#     "{mode: 3, source: 'operator', reason: '작업자 접근', hold_seconds: 0.0}"
+#
+# hold_seconds 0  → 다음 설정 전까지 무기한 유지 (서비스 지령은 자동 소멸하지 않는다)
+# hold_seconds >0 → 그 시간 동안만 유지 후 자동 해제
+
+uint8 mode                # SafetyMode.MODE_* 값
+string source             # 호출 주체. 비우면 "service"
+string reason             # 근거 문자열 (로그·트윈 표시)
+float32 hold_seconds      # 유지 시간(초). 0 = 무기한
+bool clear_latched        # true 면 기존 고정 지령을 먼저 해제하고 적용
+---
+bool accepted             # 우선순위에 밀려 미적용되면 false
+uint8 applied_mode        # 실제로 적용된 모드 (더 높은 우선순위가 있으면 그쪽)
+string applied_mode_name
+string message            # 미적용 사유 등
