@@ -18,6 +18,8 @@ import time
 from typing import Dict
 
 DEVICE_D = 0xA8
+DEVICE_CODES_ASCII = {"D": 0xA8, "W": 0xB4, "R": 0xAF, "ZR": 0xB0,
+                      "M": 0x90, "X": 0x9C, "Y": 0x9D, "B": 0xA0, "L": 0x92}
 
 
 class Memory:
@@ -65,15 +67,28 @@ class Handler(socketserver.BaseRequestHandler):
         print(f"[fake-plc] 접속 {self.client_address}")
         try:
             while True:
-                head = self._recv(9)             # 50 00 | NET PC IO(2) STN | LEN(2)
+                first = self._recv(2)
+                if first is None:
+                    break
+                if first == b"50":               # ASCII 프레임 ("5000…")
+                    head = self._recv(2 + 10 + 4)
+                    if head is None:
+                        break
+                    length = int(head[-4:].decode("ascii"), 16)
+                    body = self._recv(length)
+                    if body is None:
+                        break
+                    sock.sendall(self._process_ascii(body.decode("ascii")))
+                    continue
+                # 바이너리 프레임 : 50 00 | NET PC IO(2) STN | LEN(2)
+                head = self._recv(7)
                 if head is None:
                     break
-                (length,) = struct.unpack("<H", head[7:9])
+                (length,) = struct.unpack("<H", head[5:7])
                 body = self._recv(length)
                 if body is None:
                     break
-                resp = self._process(body)
-                sock.sendall(resp)
+                sock.sendall(self._process(body))
         except (ConnectionError, OSError):
             pass
         finally:
@@ -129,6 +144,48 @@ class Handler(socketserver.BaseRequestHandler):
             return self._reply(0x0000)
 
         return self._reply(0xC059)                       # 미지원 명령
+
+    # ------------------------------------------------------------ ASCII 처리
+    @staticmethod
+    def _reply_ascii(end_code: int, data: str = "") -> bytes:
+        payload = f"{end_code:04X}" + data
+        return (f"D000" "00FF03FF00" f"{len(payload):04X}" + payload).encode("ascii")
+
+    def _process_ascii(self, body: str) -> bytes:
+        # body = TTTT CCCC SSSS | 요청데이터
+        if len(body) < 12:
+            return self._reply_ascii(0xC061)
+        cmd = int(body[4:8], 16)
+        sub = int(body[8:12], 16)
+        req = body[12:]
+        if len(req) < 12:
+            return self._reply_ascii(0xC061)
+
+        name = req[0:2].replace("*", "").strip()
+        code = DEVICE_CODES_ASCII.get(name)
+        if code is None:
+            return self._reply_ascii(0xC05B)
+        base = 16 if name in ("W", "X", "Y", "B") else 10
+        addr = int(req[2:8], base)
+        count = int(req[8:12], 16)
+
+        if cmd == 0x0401 and sub == 0x0000:
+            if count > 960:
+                return self._reply_ascii(0xC051)
+            words = MEM.read(code, addr, count)
+            return self._reply_ascii(0x0000, "".join(f"{w:04X}" for w in words))
+
+        if cmd == 0x1401 and sub == 0x0000:
+            need = 12 + count * 4
+            if len(req) < need:
+                return self._reply_ascii(0xC058)
+            vals = [int(req[12 + i * 4:16 + i * 4], 16) for i in range(count)]
+            MEM.write(code, addr, vals)
+            tag = {2000: "정지버퍼", 3000: "속도제한버퍼"}.get(addr, f"D{addr}")
+            print(f"[fake-plc] write(ascii) {tag} ← {vals}")
+            return self._reply_ascii(0x0000)
+
+        return self._reply_ascii(0xC059)
 
 
 class Server(socketserver.ThreadingTCPServer):

@@ -17,6 +17,7 @@ profiles:
       port: 5000                  # [확인필요] MC 프로토콜 개방 포트
       frame: "3E"                 # QnUCPU = 3E / iQ-R = 4E
       protocol: "binary"          # binary | ascii  (binary 권장 — 프레임 절반)
+                                  # 모르면 tools/plc_scan.py 가 찾아 준다
       network_no: 0x00            # 자국 접속이면 0
       pc_no: 0xFF                 # 자국 CPU = 0xFF
       io_no: 0x03FF               # 자국 CPU 모듈 = 0x03FF

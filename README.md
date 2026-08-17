@@ -46,17 +46,25 @@ python3 tools/plc_probe.py --profile sim
 
 ---
 
-## 현장 투입
+## 현장 투입 — IP·포트를 몰라도 된다
 
 ```bash
-# 1) config/plc.yaml 의 field 프로파일에 실제 IP·포트 기입
-# 2) 접속 진단
-python3 tools/plc_probe.py --host 192.168.0.10 --port 5000
+# 1) 랜선 꽂고 자동 탐색. IP·포트·프레임·코드를 스스로 찾는다
+python3 tools/plc_scan.py
+
+# 2) 찾은 값을 config/plc.yaml field 프로파일에 넣고 데이터 확인
+python3 tools/plc_probe.py --profile field
+
 # 3) 기동
 ros2 launch robot_bridge bringup.launch.py profile:=field
 ```
 
-막히면 → **`docs/02_plc_setup.md` 4장 「증상별 원인표」**
+`plc_scan` 은 열린 포트마다 `3E/4E × 바이너리/ASCII` 4조합으로 실제 MC 요청을 보내
+**응답이 오는 조합**을 찾아낸다. 오류응답(`0xC056` 등)도 신원 확인으로는 성공이다 —
+요청 형식을 알아듣고 대답했다는 뜻이므로.
+
+**절차 전체는 → `docs/06_field_bringup.md`** (랜선 연결부터 캘리브레이션까지 단계별)
+막히면 → `docs/02_plc_setup.md` 4장 「증상별 원인표」
 
 ---
 
@@ -72,7 +80,7 @@ robot_dt_bridge/
 │   ├── robot_bridge_msgs/    RobotMemory · RobotCommand · RobotPose · SafetyMode
 │   │                         srv : SetSafetyMode · GetSafetyMode
 │   ├── robot_bridge/
-│   │   ├── mc_client.py          MC 3E/4E 바이너리 (표준 라이브러리만)
+│   │   ├── mc_client.py          MC 3E/4E × 바이너리/ASCII (표준 라이브러리만)
 │   │   ├── config_loader.py      yaml → 설정 객체 · raw→degree 변환
 │   │   ├── safety_gate.py        XDI↔XAG 명령 중재 · 안전 모드 (AI-102)
 │   │   ├── mode_cli.py           모드 설정 · 조회 CLI
@@ -80,8 +88,11 @@ robot_dt_bridge/
 │   │   └── unity_adapter_node.py ★ 메신저 ①
 │   └── robot_bridge_sim/     가상 PLC · 작업자 더미
 ├── unity/Assets/Scripts/     C# 6종 (씬 파일 없음 — 코드로 구성)
-├── tools/plc_probe.py        접속 진단 CLI
-└── docs/                     구조 · PLC 설정 · 데이터 계약 · 캘리브레이션 · 안전 모드
+├── tools/
+│   ├── plc_scan.py           IP·포트 자동 탐색 (현장 1순위)
+│   └── plc_probe.py          접속 진단 · 덤프 · 쓰기 시험
+└── docs/                     구조 · PLC 설정 · 데이터 계약 · 캘리브레이션 ·
+                           안전 모드 · **현장 투입 절차**
 ```
 
 ### 안전 모드 명칭

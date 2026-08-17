@@ -149,8 +149,14 @@ class McClient:
         self._fail_count += 1
         self.close()
 
+    @property
+    def is_ascii(self) -> bool:
+        return self.cfg.protocol.lower().startswith("a")
+
     # ------------------------------------------------------------ 프레임 조립
     def _build(self, command: int, subcommand: int, payload: bytes) -> bytes:
+        if self.is_ascii:
+            return self._build_ascii(command, subcommand, payload)
         body = struct.pack("<HHH", self.cfg.monitor_timer_250ms, command, subcommand) + payload
         # LEN 은 TIMER 부터 끝까지의 바이트 수
         length = len(body)
@@ -168,6 +174,25 @@ class McClient:
             sub = struct.pack("<H", 0x0050)
         return sub + head + struct.pack("<H", length) + body
 
+    def _build_ascii(self, command: int, subcommand: int, payload: bytes) -> bytes:
+        """ASCII 프레임 — 모든 필드를 대문자 16진 문자로 보낸다.
+
+        5000 | 00 | FF | 03FF | 00 | LLLL | TTTT | CCCC | SSSS | 요청데이터
+        ^부헤더                          ^TIMER 부터의 '문자 수'
+        payload 는 바이너리 형식으로 받아 여기서 ASCII 로 변환한다.
+        """
+        req = _payload_to_ascii(command, payload)
+        body = (f"{self.cfg.monitor_timer_250ms:04X}"
+                f"{command:04X}{subcommand:04X}") + req
+        head = (f"{self.cfg.network_no:02X}{self.cfg.pc_no:02X}"
+                f"{self.cfg.io_no:04X}{self.cfg.station_no:02X}")
+        if self.cfg.frame.upper() == "4E":
+            self._serial = (self._serial + 1) & 0xFFFF
+            sub = f"5400{self._serial:04X}0000"
+        else:
+            sub = "5000"
+        return (sub + head + f"{len(body):04X}" + body).encode("ascii")
+
     def _recv_exact(self, n: int) -> bytes:
         assert self._sock is not None
         buf = b""
@@ -183,6 +208,17 @@ class McClient:
         if self._sock is None:
             raise ConnectionError("PLC 에 연결되어 있지 않음")
         self._sock.sendall(self._build(command, subcommand, payload))
+
+        if self.is_ascii:
+            # D000 | 00FF03FF00 | LLLL | EEEE | 응답데이터   (전부 문자)
+            head_len = 12 if self.cfg.frame.upper() == "4E" else 4
+            header = self._recv_exact(head_len + 10 + 4).decode("ascii")
+            resp_len = int(header[-4:], 16)
+            body = self._recv_exact(resp_len).decode("ascii")
+            end_code = int(body[:4], 16)
+            if end_code != 0:
+                raise McError(end_code, context)
+            return body[4:].encode("ascii")       # 문자 그대로 돌려준다
 
         # 응답 헤더 : 부헤더(2 또는 6) + NET/PC/IO/STN(5) + LEN(2)
         head_len = 6 if self.cfg.frame.upper() == "4E" else 2
@@ -202,6 +238,11 @@ class McClient:
         payload = struct.pack("<I", addr)[:3] + bytes([code]) + struct.pack("<H", count)
         data = self._transact(CMD_BATCH_READ, SUB_WORD, payload,
                               context=f"read {device} × {count}")
+        if self.is_ascii:
+            text = data.decode("ascii")
+            if len(text) < count * 4:
+                raise McError(0xC058, f"응답 길이 부족 ({len(text)} < {count * 4})")
+            return [int(text[i * 4:(i + 1) * 4], 16) for i in range(count)]
         if len(data) < count * 2:
             raise McError(0xC058, f"응답 길이 부족 ({len(data)} < {count * 2})")
         return list(struct.unpack(f"<{count}H", data[: count * 2]))
@@ -227,6 +268,28 @@ class McClient:
             out.append((byte >> 4) & 0x0F)
             out.append(byte & 0x0F)
         return out[:count]
+
+
+# ------------------------------------------------------- ASCII 페이로드 변환
+#   ASCII 프레임의 디바이스 지정은 바이너리와 형식이 다르다.
+#     디바이스 코드  2문자  ("D*" 처럼 부족하면 '*' 로 채움)
+#     선두 디바이스  6문자  (10진 디바이스는 10진, 16진 디바이스는 16진)
+#     점수          4문자  (16진)
+_ASCII_DEV = {v: k for k, v in DEVICE_CODES.items()}
+_HEX_DEVICES = {"W", "X", "Y", "B"}
+
+
+def _payload_to_ascii(command: int, payload: bytes) -> str:
+    code = payload[3]
+    addr = int.from_bytes(payload[0:3], "little")
+    (count,) = struct.unpack("<H", payload[4:6])
+    name = _ASCII_DEV.get(code, "D")
+    head = f"{addr:06X}" if name in _HEX_DEVICES else f"{addr:06d}"
+    out = f"{name:*<2}{head}{count:04X}"
+    if command == CMD_BATCH_WRITE:                 # 쓰기는 데이터가 뒤에 붙는다
+        words = struct.unpack(f"<{count}H", payload[6:6 + count * 2])
+        out += "".join(f"{w:04X}" for w in words)
+    return out
 
 
 # ---------------------------------------------------------------- 값 변환 유틸
