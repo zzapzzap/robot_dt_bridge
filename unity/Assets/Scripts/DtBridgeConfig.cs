@@ -5,7 +5,8 @@ namespace SierraBase.RobotDT
     /// <summary>
     /// 씬 전체가 공유하는 접속 · 토픽 설정.
     /// 빈 GameObject 하나에 붙여 두고, 다른 스크립트는 여기서 값을 읽는다.
-    /// ROS 2 쪽 config/robots.yaml 의 topics 항목과 이름이 일치해야 한다.
+    /// 직접 Hi6 경로는 /robot/&lt;instance-id&gt;/... canonical topic을 사용한다.
+    /// 이 컴포넌트 한 개는 Unity 씬의 한 로봇 instance를 선택한다.
     /// </summary>
     [DisallowMultipleComponent]
     public class DtBridgeConfig : MonoBehaviour
@@ -17,7 +18,7 @@ namespace SierraBase.RobotDT
         public string rosIpAddress = "127.0.0.1";
         public int rosPort = 10000;
 
-        [Header("로봇 토픽 (robots.yaml 과 동일해야 함)")]
+        [Header("로봇 instance 토픽")]
         public string robotId = "loading";
         public string poseTopic = "/robot/loading/cmd_degs";      // Float64MultiArray[6]
         public string stateTopic = "/robot/loading/state";        // Int32MultiArray[7]

@@ -1,0 +1,52 @@
+# HD Hyundai Hi6 direct connection configuration.
+#
+# Both cell roles use the same controller/arm model.  Put shared protocol and
+# joint settings in model, and keep each physical instance limited to its own
+# address and debug-world placement.  Runtime write authority belongs to the
+# launch mode, never to an individual instance.
+
+model:
+  name: "ys080_hh050_hi6"
+  rest_port: 8888
+  stream_port: 49000
+  connect_timeout_s: 1.0
+  read_timeout_s: 1.0
+  # Successful controller pose samples are published at this rate.
+  pose_hz: 20.0
+  # The three-request controller status transaction remains deliberately slow.
+  status_hz: 5.0
+  # The latest status snapshot is republished with live age/freshness metadata.
+  status_publish_hz: 20.0
+  stale_timeout_ms: 500
+  verify_timeout_s: 3.0
+  allowed_speed_percent: [25, 50, 75, 100]
+  # Client parsing has been reviewed against schema v5. Future schema versions
+  # remain unsupported for writes until explicitly reviewed.
+  supported_api_versions: [5]
+  # Open API po_cur names are j1..j6. Change this shared model only after both
+  # controllers' nameplates and axis conventions have been verified at FAT.
+  axis_names: [J1, J2, J3, J4, J5, J6]
+  # sensor_msgs/JointState names. These must exactly match the selected URDF.
+  joint_names: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6]
+
+simulation:
+  # Functional mock traffic (pose + services) must stay on loopback.
+  host: "127.0.0.1"
+  port_base: 18888
+  pose_hz: 30.0
+  status_hz: 5.0
+  status_publish_hz: 30.0
+
+instances:
+  loading:
+    enabled: true
+    host: "192.168.250.21"
+    # Debug-RViz placement only; replace with surveyed cell coordinates.
+    visualization_base_xyz_m: [0.0, -1.5, 0.0]
+    visualization_base_rpy_rad: [0.0, 0.0, 0.0]
+
+  unloading:
+    enabled: true
+    host: "192.168.250.22"
+    visualization_base_xyz_m: [0.0, 1.5, 0.0]
+    visualization_base_rpy_rad: [0.0, 0.0, 3.1415926536]

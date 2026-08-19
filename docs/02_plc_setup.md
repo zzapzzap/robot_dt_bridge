@@ -1,143 +1,99 @@
-# 공정 PLC (MITSUBISHI MELSEC) 연계 설정
+# Mitsubishi 공정 PLC 연계 설정
 
-브리지에서 **가장 잘 막히는 지점**이라 따로 뺐다. 위에서부터 순서대로 확인하면 된다.
+## 연결 방식
 
----
+Jetson은 Linux MC Protocol client이고 공정 PLC가 TCP server다. Windows 전용
+MX Component는 사용하지 않는다. PLC CPU device에 로봇 데이터를 mirror하는
+ladder와 MC Open Setting은 PLC 담당자가 준비해야 한다.
 
-## 1. 무엇을 정해야 하나 — 결정 변수 5개
+## PLC 담당자에게 받을 계약
 
-| # | 변수 | 왜 중요한가 | 현재 상태 |
-|---|---|---|---|
-| V1 | **PLC IP · 서브넷 · 게이트웨이** | Host 가 같은 대역에 있어야 MC 프로토콜이 통한다 | `192.168.0.10 / 24 / .1` **[확인필요]** |
-| V2 | **MC 프로토콜 포트 개방 여부** | 내장 Ethernet 은 기본적으로 닫혀 있다. GX Works 에서 **열어 줘야** 한다 | **[에이시스 확인요청]** |
-| V3 | **프레임 · 코드** (3E/4E, 바이너리/ASCII) | 불일치하면 `0xC050` 으로 즉사 | QnUCPU → `3E` + `바이너리` 가정 |
-| V4 | **D 레지스터 실주소** | `RwrD2000` 은 CC-Link 버퍼 표기다. PLC 실 디바이스가 뭔지 별개 | **[에이시스 확인요청]** |
-| V5 | **쓰기 허용 여부** | 읽기만 열고 쓰기는 막아 두는 설정이 흔하다 | **[에이시스 확인요청]** |
+| 항목 | 필요한 값 |
+|---|---|
+| CPU/Ethernet | 정확한 형명과 GX Works 버전 |
+| 네트워크 | PLC IP, mask, 허용 Jetson IP |
+| MC | TCP port, 3E/4E, binary/ASCII, remote password |
+| 읽기 | 로봇별 pose/status의 PLC-local D/W/R/ZR 주소와 word packing |
+| 쓰기 | 로봇별 request 주소, level/pulse, one-hot/reset timing |
+| 확인 | actual state/speed 또는 request-seq/ack-seq/result |
+| fail-safe | Jetson heartbeat 주소와 PLC ladder timeout 동작 |
 
-V1·V3 은 우리가 맞추면 되고, **V2·V4·V5 는 에이시스 회신이 있어야 진행된다.**
-회신 전까지는 `profile: sim` 으로 전체 파이프라인을 검증한다.
+참고자료의 `RwrD...`는 상위 통신 buffer 표기다. Main PLC에서 MC로 접근할 실제
+`D2000`이라는 뜻이 아니므로 주소를 그대로 복사하지 않는다.
 
----
+## GX Works Open Setting
 
-## 2. PLC 쪽 설정 (GX Works2 / GX Works3)
+QnUCPU 계열 후보 예시는 다음과 같다. 실제 CPU 매뉴얼을 우선한다.
 
-### 2.1 내장 Ethernet 포트
-
-```
-[네비게이션] 파라미터 → PLC 파라미터 → 내장 Ethernet 포트 설정
-    IP 주소          192.168.  0. 10
-    서브넷 마스크     255.255.255.  0
-    기본 게이트웨이   192.168.  0.  1
-    교신 데이터 코드  ● 바이너리 코드      ← ASCII 로 두면 0xC050
-    [ ] RUN 중 쓰기 허용                  ← V5. 명령 write 하려면 체크 필요
-```
-
-### 2.2 개방 설정 (여기를 빠뜨리면 TCP 부터 안 붙는다)
-
-```
-[내장 Ethernet 포트 설정] → 오픈 설정
-  프로토콜        TCP
-  오픈 방식       MC 프로토콜        ← "언패시브" 아님. MC 프로토콜 선택
-  자국 포트번호   5000  (16진 1388)
+```text
+Protocol              TCP
+Open system           MC Protocol
+Communication code    Binary
+Local port            9000 (현장 확인값)
+Online change         쓰기 FAT를 할 때만 승인 후 허용
 ```
 
-> 자국 포트번호는 **10진/16진 표기 혼동**이 잦다. GX Works 는 16진으로 받는 화면이
-> 있으니 `5000(10진) = 1388(16진)` 을 확인할 것.
+현재 E71 Open Setting과 실측은 TCP `9000`, MC 3E Binary다. GX Works와
+`config/plc.yaml` 양쪽 값을 일치시킨다.
 
-### 2.3 원격 패스워드
+remote password가 켜져 있으면 현재 client는 unlock을 구현하지 않았으므로 연결을
+운영 승인하지 않는다.
 
-원격 패스워드가 걸려 있으면 첫 요청이 `0xC201` 로 거절된다.
-해제하거나, 브리지에서 언락 프레임을 먼저 보내야 한다(현재 미구현 — 해제 권장).
+## Jetson 제어 NIC 제안
 
----
+격리된 USB-GbE/산업용 switch 구성의 제안값이다.
 
-## 3. Host (AGX Orin) 쪽 설정
+```text
+PLC       192.168.10.30/24       (사용자 확인값)
+Jetson    192.168.10.61/24       (권장 수정값)
+Gateway   없음
+DNS       없음
+Default route로 사용하지 않음
+```
+
+실제 USB NIC 이름을 먼저 확인한다. `usb0/usb1`은 Jetson gadget interface일 수
+있으므로 이름을 추측하지 않는다.
 
 ```bash
-# 제어망 인터페이스에 고정 IP
-sudo nmcli con add type ethernet ifname eth0 con-name ctrl \
-     ip4 192.168.0.61/24 gw4 192.168.0.1
-sudo nmcli con up ctrl
+nmcli device status
+ip -br link
 
-ping -c 3 192.168.0.10          # 1단계
+sudo nmcli con add type ethernet ifname <enx...> con-name plc-control \
+  ipv4.method manual ipv4.addresses 192.168.10.61/24 \
+  ipv4.never-default yes ipv4.gateway "" ipv4.dns "" \
+  ipv6.method disabled
+sudo nmcli con up plc-control
 ```
 
-`ping` 은 되는데 포트가 안 열리면 **2.2 개방 설정**을 다시 본다.
+공장망에 기존 주소 계획이 있으면 위 제안 대신 현장 값을 사용한다.
+
+## 읽기부터 확인
 
 ```bash
-python3 tools/plc_probe.py --host 192.168.0.10 --port 5000
+ping -c 3 192.168.10.30
+python3 tools/plc_probe.py --host 192.168.10.30 --port 9000 --dump D1000 21
 ```
 
-기대 출력:
+Jetson `eno1=192.168.10.61/24`에서 ping과 TCP 9000, MC batch-read가 성공했다.
+기존 `192.168.0.61/24`는 PLC와 다른 subnet이라 직접 연결에 사용하지 않는다.
 
-```
-■ 접속 시도  192.168.0.10:5000  frame=3E binary
-  ✓ TCP 연결 성공
-  ✓ MC 응답 정상 (end code 0x0000) — D1000 × 14
-```
+`D1000 x21`과 No.9~17 주소는 읽혔지만 pose scale/sign/zero offset은 아직
+교정 전이다. MC 정상응답과 값 변화만으로 정밀 자세 계약이 끝난 것은 아니다.
 
----
+No.9~17 쓰기는 public launch에서 잠겨 있다. 입회 FAT 때만
+`allow_field_control_writes:=true`로 열며, D1100.1은 항상 읽기 전용이다.
 
-## 4. 증상별 원인표
+## 자주 만나는 오류
 
-| 증상 | 원인 | 조치 |
-|---|---|---|
-| TCP 연결 자체가 안 됨 | 개방 설정 없음 / 포트 불일치 / 대역 다름 | 2.2, V1 |
-| `0xC050` | ASCII ↔ 바이너리 불일치 | 2.1 교신 데이터 코드 |
-| `0xC051` | 요청 점수 초과 (워드 960 초과) | `read_block.words` 축소 |
-| `0xC056` | 디바이스 범위 초과 | D 주소 · 점수 확인 (V4) |
-| `0xC059` | 명령/서브명령 오류 (4E 인데 3E 로 보냄) | `frame: "4E"` |
-| `0xC05B` | 해당 디바이스 접근 불가 | 디바이스 종류 · 쓰기 금지 (V5) |
-| `0xC201` | 원격 패스워드 잠김 | 2.3 |
-| 읽히는데 각도가 이상 | `scale` 미교정 | `docs/04_calibration.md` |
+| 증상 | 확인 |
+|---|---|
+| TCP 연결 실패 | NIC link, subnet, Open Setting, port |
+| `0xC050` | binary/ASCII 불일치 |
+| `0xC056` | PLC-local device 주소/범위 오류 |
+| `0xC05B` | device 종류 또는 쓰기 권한 |
+| `0xC059` | 3E/4E 또는 command 형식 |
+| `0xC201` | remote password 잠김 |
+| 값은 읽히나 자세가 다름 | DWORD word order, scale, sign, zero offset |
 
----
-
-## 5. GUI 연계 — 3가지 선택지
-
-| 방식 | 장점 | 단점 | 판단 |
-|---|---|---|---|
-| **A. MC 프로토콜 직접** (현 구현) | 의존성 0, Linux/AGX 에서 그대로 동작, 소스 공개 | GX Works 개방 설정 필요 | **채택** |
-| B. MX Component (ActUtlType OLE) | GX Works 통신설정을 그대로 재사용, 드라이버가 예외처리 | **Windows 전용** — AGX Orin 에서 못 씀 | 미채택 |
-| C. GOT / SCADA 경유 | 현장 표준 화면 재사용 | 중간 계층 지연 추가, 라이선스 | 미채택 |
-
-> B 는 Host 가 Jetson(Linux)이라는 점에서 애초에 불가하다. 다만 **에이시스가
-> Windows 기반 통합 컨트롤러에서 MX Component 를 이미 쓰고 있다면**, 그쪽이
-> ROS 2 토픽을 직접 발행하고 우리는 구독만 하는 구성(= `plc_ros_bridge_spec.md`
-> 4장 옵션 1)이 더 낫다. **이건 에이시스와 합의할 사항이다.**
-
-### 어느 쪽이든 계약은 동일
-
-브리지 배치가 A 든 옵션 1 이든, **토픽 계약(`docs/03_data_contract.md`)만
-맞으면 Unity 쪽은 손댈 게 없다.** 그래서 이 프로젝트는 두 경우 모두를 지원한다.
-
-- 우리가 직접 읽는 경우 → `robot_memory_node` 실행
-- 에이시스가 발행하는 경우 → `robot_memory_node` 를 끄고 `unity_adapter_node` 만 실행
-
----
-
-## 6. 메모리 할당 요약
-
-```
-읽기  D1000        운전상태            WORD
-      D1002~D1013  6축 축좌표          DWORD × 6   (하위워드 먼저)
-      D1100.0~.5   Hold/E-stop/…       BIT
-
-쓰기  D2000~D2002  운전 / 일시정지 / 정지      ← RwrD2000~2002 대응 [확인필요]
-      D3000~D3002  감속 1 / 2 / 3            ← RwrD3000~3002 대응 [확인필요]
-```
-
-주기 : 읽기 20 Hz(사양 18 Hz 이상), 쓰기 재기록 19 Hz(사양 51.1 ms).
-
----
-
-## 7. 현장 반입 체크리스트
-
-- [ ] V1 IP · 게이트웨이 확정 및 Host 고정 IP 설정
-- [ ] V2 MC 프로토콜 개방(포트 5000, TCP, 바이너리) 완료
-- [ ] `ping` → `plc_probe` → `--dump D1000 14` 3단계 통과
-- [ ] V4 쓰기 실주소 확정 후 `plc.yaml write_block.device` 반영
-- [ ] V5 쓰기 권한 확인 → `plc_probe --write D2000 0 1 0` 로 실기록 확인
-- [ ] `ros2 topic hz /robot/loading/cmd_degs` ≥ 18 Hz
-- [ ] 축별 캘리브레이션(`docs/04_calibration.md`) 완료 후 `calibrated: true`
-- [ ] Unity 재생 → 실로봇 조그와 화면이 일치
+MC end code `0x0000`은 PLC memory 요청 성공이다. 로봇이 실제로 정지/감속했다는
+뜻이 아니며, 그 판단은 별도의 PLC actual feedback으로만 한다.

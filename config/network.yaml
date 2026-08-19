@@ -7,16 +7,26 @@
 
 segments:
 
-  control:                         # 제어망 — PLC · 통합 컨트롤러 · Host
-    subnet: "192.168.0.0/24"
+  hi6_control:                     # Jetson ↔ Hi6 전용 OT 망 (직결 구성)
+    subnet: "192.168.250.0/24"
     netmask: "255.255.255.0"
-    gateway: "192.168.0.1"         # [확인필요] 현장 게이트웨이 (VPHM 확인)
+    gateway: null                  # 이 NIC 에 default route 를 만들지 않는다
+    dns: []
+    forwarding: false              # Wi-Fi/VPN 쪽으로 라우팅·NAT 금지
+    hosts:
+      jetson:          "192.168.250.10"
+    note: "로봇별 IP는 hi6.yaml instances에서만 관리. 한 USB-GbE + 산업용 스위치 사용"
+
+  control:                         # 운영 제어망 — 공정 PLC ↔ Jetson
+    subnet: "192.168.10.0/24"
+    netmask: "255.255.255.0"
+    gateway: null                  # 격리망: default route/DNS를 만들지 않음
     vlan: null
     hosts:
-      plc:            "192.168.0.10"    # [확인필요] 공정 PLC 내장 Ethernet
-      robot_ctrl:     "192.168.0.20"    # 통합 로봇 컨트롤러 (NUC, 에이시스)
-      host_agx:       "192.168.0.61"    # Host AGX Orin (Digital Twin · XAI)
-      unity_dev:      "192.168.0.100"   # 개발 PC (Unity 에디터)
+      plc:            "192.168.10.30"   # 현장 확인값, ping 정상
+      host_agx:       "192.168.10.61"   # eno1에 영구 적용
+    mc_port: 9000                    # 현장 MC 3E Binary batch-read 확인값
+    note: "Jetson은 20 Hz로 poll하며 PLC/로봇 원천 갱신보다 빠르면 동일 sample이 반복될 수 있음"
 
   ros2:                            # ROS 2 통신망 — Edge ↔ Host
     subnet: "192.168.0.0/24"
@@ -41,7 +51,9 @@ ros2:
 # ============================================================================
 
 ports:
-  - { name: "MC protocol (PLC)",     proto: tcp, port: 5000,  direction: "Host → PLC" }
+  - { name: "Hi6 OpenAPI",             proto: tcp, port: 8888,  direction: "Jetson → Hi6" }
+  - { name: "Hi6 socket Stream",       proto: tcp, port: 49000, direction: "Jetson → Hi6 (선택)" }
+  - { name: "MC protocol (PLC)",     proto: tcp, port: 9000,  direction: "Jetson → PLC" }
   - { name: "MC protocol (sim)",     proto: tcp, port: 5010,  direction: "Host → 내부" }
   - { name: "ROS-TCP-Endpoint",      proto: tcp, port: 10000, direction: "Unity → Host" }
   - { name: "DDS discovery",         proto: udp, port: 7400,  direction: "내부망 전체" }
@@ -53,9 +65,10 @@ ports:
 
 checklist:
   - "1. PC ↔ PLC 물리 결선 · 링크 LED 확인"
-  - "2. ping 192.168.0.10 응답 확인"
-  - "3. tools/plc_probe.py --host 192.168.0.10 --port 5000 → MC 3E 응답 코드 0x0000"
-  - "4. tools/plc_probe.py --dump D1000 14 → 14워드 덤프 확인"
-  - "5. ros2 launch robot_bridge bringup.launch.py profile:=field"
-  - "6. ros2 topic hz /robot/loading/cmd_degs → 18 Hz 이상"
-  - "7. Unity 재생 → 관절 6축이 실로봇과 동일하게 움직이는지 육안 확인"
+  - "2. ip route get 192.168.10.30 → eno1/src 192.168.10.61 확인"
+  - "3. ping 192.168.10.30 응답 확인 (2026-08-18 통과)"
+  - "4. PLC TCP 9000 및 MC 3E Binary Open Setting 확인"
+  - "5. tools/plc_probe.py --host 192.168.10.30 --port 9000 --dump D1000 21"
+  - "6. ros2 launch robot_bridge robot_system.launch.py sim:=false debug:=true"
+  - "7. ros2 topic hz /robot/loading/pose → 약 20 Hz 확인"
+  - "8. Unity 재생 → 관절 6축이 실로봇과 동일하게 움직이는지 육안 확인"

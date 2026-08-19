@@ -17,11 +17,13 @@ QnUCPU 내장 Ethernet 포트의 3E 프레임(바이너리)을 기본으로 하�
 
 from __future__ import annotations
 
+import ipaddress
+import math
 import socket
 import struct
-import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 # ---------------------------------------------------------------- 디바이스 코드
 DEVICE_CODES = {
@@ -38,6 +40,7 @@ DEVICE_CODES = {
 
 CMD_BATCH_READ = 0x0401
 CMD_BATCH_WRITE = 0x1401
+CMD_RANDOM_WRITE = 0x1402
 SUB_WORD = 0x0000
 SUB_BIT = 0x0001
 
@@ -86,6 +89,10 @@ def parse_device(text: str) -> tuple[int, int]:
 class McConfig:
     host: str = "192.168.0.10"
     port: int = 5000
+    # When the Jetson has more than one active NIC, bind the MC session to the
+    # PLC-facing address instead of relying on the default route.  ``None``
+    # keeps the operating-system routing choice used by older configurations.
+    source_address: Optional[str] = None
     frame: str = "3E"                 # "3E" | "4E"
     protocol: str = "binary"          # 현재 binary 만 지원
     network_no: int = 0x00
@@ -98,15 +105,120 @@ class McConfig:
     reconnect_backoff_s: Sequence[float] = field(default_factory=lambda: [0.5, 1.0, 2.0, 5.0])
 
     @classmethod
-    def from_dict(cls, d: dict) -> "McConfig":
-        known = {f for f in cls.__dataclass_fields__}          # noqa: SLF001
-        return cls(**{k: v for k, v in d.items() if k in known})
+    def from_dict(
+        cls,
+        values: Mapping[str, Any],
+        *,
+        strict: bool = False,
+    ) -> "McConfig":
+        """Build a connection config from YAML-compatible values.
+
+        The historical API ignored unrelated keys, so that remains the
+        default for the small standalone tools.  The production config loader
+        opts into ``strict=True`` and fails closed on a misspelled field.
+        Validation is kept explicit because :class:`PlcBridgeConfig` adds
+        profile-specific endpoint rules after constructing this object.
+        """
+        if not isinstance(values, Mapping):
+            raise ValueError("MC connection config must be a mapping")
+        known = set(cls.__dataclass_fields__)                  # noqa: SLF001
+        unknown = set(values) - known
+        if strict and unknown:
+            names = ", ".join(sorted(str(name) for name in unknown))
+            raise ValueError(f"unknown MC connection config field(s): {names}")
+        return cls(**{key: value for key, value in values.items() if key in known})
+
+    def validate(self) -> None:
+        """Reject values that cannot form a bounded IPv4 MC session."""
+        if not isinstance(self.host, str) or not self.host.strip():
+            raise ValueError("host must be a non-empty hostname or IPv4 address")
+        self.host = self.host.strip()
+        if "://" in self.host:
+            raise ValueError("host must not include an URL scheme")
+
+        if isinstance(self.port, bool) or not isinstance(self.port, int):
+            raise ValueError("port must be an integer")
+        if not 1 <= self.port <= 65535:
+            raise ValueError("port must be in the range 1..65535")
+
+        source = self.source_address
+        if source is not None and not isinstance(source, str):
+            raise ValueError(
+                "source_address must be a numeric IPv4 address or empty"
+            )
+        source_text = (source or "").strip()
+        if source_text:
+            try:
+                self.source_address = str(ipaddress.IPv4Address(source_text))
+            except ipaddress.AddressValueError as exc:
+                raise ValueError(
+                    "source_address must be a numeric IPv4 address or empty"
+                ) from exc
+        else:
+            self.source_address = None
+
+        if not isinstance(self.frame, str):
+            raise ValueError("frame must be '3E' or '4E'")
+        self.frame = self.frame.strip().upper()
+        if self.frame not in {"3E", "4E"}:
+            raise ValueError("frame must be '3E' or '4E'")
+
+        if not isinstance(self.protocol, str):
+            raise ValueError("protocol must be 'binary' or 'ascii'")
+        self.protocol = self.protocol.strip().lower()
+        if self.protocol not in {"binary", "ascii"}:
+            raise ValueError("protocol must be 'binary' or 'ascii'")
+
+        integer_limits = {
+            "network_no": 0xFF,
+            "pc_no": 0xFF,
+            "io_no": 0xFFFF,
+            "station_no": 0xFF,
+            "monitor_timer_250ms": 0xFFFF,
+        }
+        for name, maximum in integer_limits.items():
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= maximum
+            ):
+                raise ValueError(f"{name} must be an integer in 0..{maximum}")
+
+        for name in ("connect_timeout_s", "read_timeout_s"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{name} must be a positive finite number")
+            normalized = float(value)
+            if not math.isfinite(normalized) or normalized <= 0.0:
+                raise ValueError(f"{name} must be a positive finite number")
+            setattr(self, name, normalized)
+
+        backoff = self.reconnect_backoff_s
+        if isinstance(backoff, (str, bytes)) or not isinstance(backoff, Sequence):
+            raise ValueError("reconnect_backoff_s must be a sequence")
+        normalized_backoff = []
+        for value in backoff:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(
+                    "reconnect_backoff_s values must be positive finite numbers"
+                )
+            delay = float(value)
+            if not math.isfinite(delay) or delay <= 0.0:
+                raise ValueError(
+                    "reconnect_backoff_s values must be positive finite numbers"
+                )
+            normalized_backoff.append(delay)
+        # Preserve the old empty-list fallback while preventing a zero-delay
+        # reconnect loop.
+        self.reconnect_backoff_s = normalized_backoff or [1.0]
 
 
 class McClient:
     """단일 PLC 세션. 스레드 안전하지 않으므로 노드당 1개씩 사용한다."""
 
     def __init__(self, cfg: McConfig, logger=None):
+        cfg.validate()
         self.cfg = cfg
         self._sock: Optional[socket.socket] = None
         self._serial = 0                     # 4E 프레임 시리얼 번호
@@ -125,13 +237,24 @@ class McClient:
     def connect(self) -> None:
         self.close()
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(self.cfg.connect_timeout_s)
-        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        s.connect((self.cfg.host, self.cfg.port))
-        s.settimeout(self.cfg.read_timeout_s)
+        try:
+            s.settimeout(self.cfg.connect_timeout_s)
+            s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            if self.cfg.source_address is not None:
+                s.bind((self.cfg.source_address, 0))
+            s.connect((self.cfg.host, self.cfg.port))
+            s.settimeout(self.cfg.read_timeout_s)
+        except BaseException:
+            # A failed bind/connect must not leave an untracked descriptor or
+            # make ``connected`` report a half-open session.
+            s.close()
+            raise
         self._sock = s
         self._fail_count = 0
-        self._info(f"PLC 연결 : {self.cfg.host}:{self.cfg.port} ({self.cfg.frame} {self.cfg.protocol})")
+        self._info(
+            f"PLC 연결 : {self.cfg.host}:{self.cfg.port} "
+            f"({self.cfg.frame} {self.cfg.protocol})"
+        )
 
     def close(self) -> None:
         if self._sock is not None:
@@ -143,7 +266,11 @@ class McClient:
 
     def backoff_delay(self) -> float:
         b = list(self.cfg.reconnect_backoff_s) or [1.0]
-        return b[min(self._fail_count, len(b) - 1)]
+        # note_failure() increments before callers ask for the delay.  Convert
+        # that 1-based failure count to a 0-based schedule index so the first
+        # failure uses the configured first cooldown rather than skipping it.
+        index = max(0, self._fail_count - 1)
+        return b[min(index, len(b) - 1)]
 
     def note_failure(self) -> None:
         self._fail_count += 1
@@ -256,6 +383,81 @@ class McClient:
                    + struct.pack(f"<{n}H", *[v & 0xFFFF for v in values]))
         self._transact(CMD_BATCH_WRITE, SUB_WORD, payload,
                        context=f"write {device} × {n}")
+
+    def write_random_words(
+        self,
+        writes: Mapping[str, int] | Sequence[tuple[str, int]],
+    ) -> None:
+        """Write non-contiguous word devices in one MC request.
+
+        MC command ``0x1402/0x0000`` encodes one byte each for the word and
+        double-word point counts, followed by ``device + WORD`` records.  This
+        API deliberately exposes only the word half of that command because
+        the robot-control contract consists entirely of individual D words.
+
+        The order supplied by the caller is retained.  Duplicate physical
+        devices are rejected even when their spellings differ (for example,
+        ``d1018`` and ``D1018``), avoiding an ambiguous last-write-wins command.
+        """
+        if self.is_ascii:
+            raise ValueError(
+                "random word write (0x1402) is supported only for MC binary protocol"
+            )
+
+        if isinstance(writes, Mapping):
+            requested = list(writes.items())
+        elif isinstance(writes, Sequence) and not isinstance(
+            writes,
+            (str, bytes, bytearray),
+        ):
+            requested = list(writes)
+        else:
+            raise TypeError("writes must be a mapping or a sequence of (device, value) pairs")
+
+        count = len(requested)
+        if not 1 <= count <= 0xFF:
+            raise ValueError("random word write requires 1..255 device/value pairs")
+
+        normalized: list[tuple[int, int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for index, item in enumerate(requested):
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                raise ValueError(
+                    f"random word write item {index} must be a (device, value) pair"
+                )
+            device, value = item
+            if not isinstance(device, str):
+                raise TypeError(f"random word write device {index} must be a string")
+            code, addr = parse_device(device)
+            if not 0 <= addr <= 0xFFFFFF:
+                raise ValueError(f"device address is outside the MC 24-bit range: {device!r}")
+            key = (code, addr)
+            if key in seen:
+                raise ValueError(f"duplicate random word write device: {device!r}")
+            seen.add(key)
+            try:
+                word = int(value) & 0xFFFF
+            except (TypeError, ValueError) as exc:
+                raise TypeError(
+                    f"random word write value {index} must be an integer"
+                ) from exc
+            normalized.append((code, addr, word))
+
+        # Binary random-write payload:
+        #   word points (U8), dword points (U8=0), then N records of
+        #   address (U24 LE), device code (U8), value (U16 LE).
+        payload = bytearray((count, 0))
+        for code, addr, word in normalized:
+            payload.extend(struct.pack("<I", addr)[:3])
+            payload.append(code)
+            payload.extend(struct.pack("<H", word))
+
+        self._transact(
+            CMD_RANDOM_WRITE,
+            SUB_WORD,
+            bytes(payload),
+            context=f"random write × {count}",
+        )
 
     def read_bits(self, device: str, count: int) -> List[int]:
         """비트 단위 일괄 읽기 (1비트 = 니블 1개로 반환됨)."""

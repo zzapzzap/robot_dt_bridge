@@ -1,7 +1,6 @@
 # 안전 모드 설정.
 #
-#   ros2 service call /robot/loading/set_mode robot_bridge_msgs/srv/SetSafetyMode \
-#     "{mode: 3, source: 'operator', reason: '작업자 접근', hold_seconds: 0.0}"
+#   ros2 service call /robot/loading/set_mode robot_bridge_msgs/srv/SetSafetyMode "{mode: 3, source: 'operator', reason: '작업자 접근', hold_seconds: 0.0}"
 #
 #   mode 3 = MODE_REDUCED_50 = 전속의 50 % 로 운전
 #

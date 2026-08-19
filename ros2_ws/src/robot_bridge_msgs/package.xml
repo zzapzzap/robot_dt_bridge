@@ -3,7 +3,7 @@
 <package format="3">
   <name>robot_bridge_msgs</name>
   <version>0.1.0</version>
-  <description>현대 로딩/언로딩 로봇 ↔ 공정 PLC ↔ 디지털 트윈 브리지 메시지 정의</description>
+  <description>현대 로딩/언로딩 로봇 직접 제어 및 PLC 브리지 인터페이스 정의</description>
   <maintainer email="jhlee@sierrabase.co.kr">Sierra Base</maintainer>
   <license>Proprietary</license>
 

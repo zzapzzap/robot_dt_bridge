@@ -12,6 +12,10 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
+        (os.path.join("share", package_name, "urdf"), glob("urdf/*")),
+        (os.path.join("share", package_name, "rviz"), glob("rviz/*")),
+        (os.path.join("share", package_name, "meshes", "ys080_hh050"),
+         glob(os.path.join("meshes", "ys080_hh050", "*"))),
         # 저장소 루트의 config/ 를 패키지 share 로 복사해 배포본에서도 동작하게 한다
         (os.path.join("share", package_name, "config"),
          glob(os.path.join("..", "..", "..", "config", "*.yaml"))),
@@ -20,12 +24,14 @@ setup(
     zip_safe=True,
     maintainer="Sierra Base",
     maintainer_email="jhlee@sierrabase.co.kr",
-    description="로봇 ↔ PLC ↔ 디지털 트윈 브리지",
+    description="현대 Hi6 직결 및 MELSEC PLC ↔ ROS 2 디지털 트윈 브리지",
     license="Proprietary",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "robot_memory_node = robot_bridge.robot_memory_node:main",
+            "plc_gateway_node = robot_bridge.plc_gateway_node:main",
+            "hi6_robot_node = robot_bridge.hi6_robot_node:main",
             "unity_adapter_node = robot_bridge.unity_adapter_node:main",
             "mode_cli = robot_bridge.mode_cli:main",
         ],

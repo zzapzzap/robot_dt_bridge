@@ -1,0 +1,20 @@
+# D1100.0 일시정지(Hold) 비트를 설정하거나 해제한다.
+# 안전 정격 정지 장치를 대체하지 않으며 비상정지 쓰기를 수행하지 않는다.
+# confirmation_timeout_sec가 0이면 서버 기본값을 사용한다.
+
+string request_id
+string source
+string reason
+bool hold
+float32 confirmation_timeout_sec
+---
+# controller_ack는 PLC transport가 쓰기 요청에 정상 응답했음을 뜻한다.
+# register_readback은 별도 읽기에서 요청한 D1100.0 값이 확인됐음을 뜻한다.
+# 둘 다 로봇의 실제 정지 또는 재가동 완료를 보증하지 않는다.
+bool accepted
+bool controller_ack
+bool register_readback
+robot_bridge_msgs/RobotControlState control_state
+string request_id
+string error_code
+string message

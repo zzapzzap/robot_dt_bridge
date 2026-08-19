@@ -1,0 +1,20 @@
+# 로봇 job의 일반 운전/공정 정지를 요청한다.
+# 이 서비스는 안전 정격 비상정지 장치나 보호정지 회로를 대체하지 않는다.
+# confirmation_timeout_sec가 0이면 서버 기본값을 사용한다.
+
+string request_id
+string source
+string reason
+float32 confirmation_timeout_sec
+---
+# accepted: 입력 검증과 현재 상태 정책을 통과하여 요청을 접수함.
+# controller_ack: upstream PLC/controller transport가 요청을 정상 응답함.
+# PLC 경로에서는 MC memory write 성공일 뿐 로봇 동작 완료를 뜻하지 않는다.
+# confirmed: 타임아웃 안에서 별도의 actual feedback이 STOPPED로 재조회됨.
+bool accepted
+bool controller_ack
+bool confirmed
+robot_bridge_msgs/RobotStatus actual
+string request_id
+string error_code
+string message
