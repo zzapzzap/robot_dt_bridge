@@ -10,8 +10,9 @@ namespace SierraBase.RobotDT
     /// 구독해 6축 관절에 그대로 적용한다.
     ///
     /// 관절 6개를 base → J1 → … → J6 순서로 Inspector 에 꽂아 두면 된다.
-    /// 회전축과 부호는 STEP 도면(YS080/HH050)에서 읽은 값을 기본으로 하며,
-    /// 실로봇과 방향이 반대면 sign 을 -1 로 뒤집는다.
+    /// PLC 경로의 부호와 영점은 ROS unity_adapter 에서 이미 CAD 좌표로
+    /// 변환된다. 따라서 sign/offsetDeg 기본값은 1/0으로 유지하고, 이 값은
+    /// Unity asset 자체의 로컬 축이 CAD와 다를 때만 사용한다.
     /// </summary>
     public class RobotPoseReceiver : MonoBehaviour
     {
@@ -23,9 +24,9 @@ namespace SierraBase.RobotDT
             public Transform link;
             [Tooltip("로컬 회전축 (STEP 기준)")]
             public Vector3 axis = Vector3.up;
-            [Tooltip("PLC 부호 ↔ Unity 회전방향 정합. 어긋나면 -1")]
+            [Tooltip("ROS에서 CAD 부호 변환 완료. Unity asset 로컬 축 보정만 사용")]
             public float sign = 1f;
-            [Tooltip("모델 home 자세 보정(도)")]
+            [Tooltip("ROS에서 CAD 영점 변환 완료. Unity asset 추가 home 보정만 사용(도)")]
             public float offsetDeg = 0f;
 
             [HideInInspector] public Quaternion home;

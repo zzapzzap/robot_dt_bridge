@@ -1,74 +1,143 @@
-# ============================================================================
-#  로봇 정의 — 축 이름 · 변환 파라미터 · 토픽
-#  ---------------------------------------------------------------------------
-#  angle_deg[i] = raw_dword[i] * scale[i] * dir[i] + offset_deg[i]
+# =============================================================================
+# PLC에 미러링된 로봇 인스턴스별 레지스터 맵
+# -----------------------------------------------------------------------------
+# 아래 loading 맵은 「XAI 통합 현대로봇 사양 정리_260618」에서 옮긴
+# SAMPLE/UNVERIFIED 맵이다. PLC 래더의 실제 D 디바이스와 일치한다는 확인 전에는
+# config/plc.yaml의 field.commissioned를 true로 바꾸지 않는다.
 #
-#  scale / dir / offset 은 실측 캘리브레이션으로 확정한다 (docs/04_calibration.md).
-#  확정 전에는 아래 기본값으로 동작하되, 로그에 [미교정] 경고를 남긴다.
-# ============================================================================
+# 각 enabled 인스턴스는 서로 겹치지 않는 read/status/write 범위를 가져야 한다.
+# 두 번째 로봇은 PLC 담당자가 별도 미러 범위를 확정한 뒤 map을 추가하고 enabled를
+# true로 바꾼다. 다른 제작사(Yaskawa) 슬라이드의 축/주소를 재사용하지 않는다.
+# =============================================================================
+
+schema_version: 1
 
 robots:
-
   - id: loading
     label: "현대 로딩 로봇 (YS080)"
     enabled: true
-    plc_profile_block: read_block          # plc.yaml 의 read_block 사용
+    calibrated: false
     axis_names: [S, H, V, R2, B, R1]
-    calibrated: false                      # 실측 완료 시 true 로 변경
-    scale:  [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]   # [확인필요] deg/LSB
-    dir:    [1, 1, 1, 1, 1, 1]                            # [확인필요] ±1
-    offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]                # [확인필요] deg
-    limits_deg:                            # 안전 범위 — 벗어나면 마지막 유효값 유지
-      min: [-180, -90,  -90, -180, -135, -360]
-      max: [ 180, 155,  255,  180,  135,  360]
-    topics:
-      memory:  "/robot/loading/memory"
-      pose:    "/robot/loading/cmd_degs"
-      state:   "/robot/loading/state"
-      command: "/robot/loading/command"
-      mode:    "/robot/loading/mode"
+    scale:  [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]  # 마지막 두 자리=소수부
+    # PLC/Hi6가 보낸 축좌표는 부호를 바꾸지 않고 그대로 공개한다.
+    dir:
+      field: [1, 1, 1, 1, 1, 1]
+      sim:   [1, 1, 1, 1, 1, 1]
+    offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    # controller 축좌표 → YS080/HH050 CAD 관절각. RViz와 Unity에만
+    # 적용하며 /pose.degrees와 PLC probe 값은 바꾸지 않는다.
+    visual_dir:    [-1, 1, -1, -1, 1, -1]
+    visual_offset: [0.0, -90.0, 0.0, 0.0, 0.0, 0.0]
+    limits_deg:
+      min: [-180, -90, -90, -180, -135, -360]
+      max: [ 180, 155, 255,  180,  135,  360]
+
+    plc_map:
+      map_status: "sample_unverified"
+      # sim은 이 샘플 맵대로 만든 가짜 PLC이므로 readback을 검증할 수 있다.
+      # No.9~17 command map과 실제 로봇 피드백의 검증 여부는 서로 다르다.
+      # command_map_verified는 주소/레지스터 readback만 뜻하며 실제 동작 ACK가 아니다.
+      availability:
+        field:
+          command_map_verified: true
+          actual_feedback_available: false
+          ack_available: false
+        sim:
+          command_map_verified: true
+          actual_feedback_available: false
+          ack_available: false    # command-id/ACK 레지스터는 sim에도 정의하지 않음
+
+      read:
+        head: "D1000"
+        words: 21                 # D1000~D1020 (상태 피드백 포함)
+        axes:
+          - { name: S,  offset: 2,  type: dword }   # D1002/D1003
+          - { name: H,  offset: 4,  type: dword }   # D1004/D1005
+          - { name: V,  offset: 6,  type: dword }   # D1006/D1007
+          - { name: R2, offset: 8,  type: dword }   # D1008/D1009
+          - { name: B,  offset: 10, type: dword }   # D1010/D1011
+          - { name: R1, offset: 12, type: dword }   # D1012/D1013
+        feedback:
+          operation_state: { offset: 0,  type: word }  # D1000
+          run:             { offset: 14, type: word }  # D1014
+          speed_down_1:    { offset: 16, type: word }  # D1016 (25%)
+          speed_down_2:    { offset: 18, type: word }  # D1018 (50%)
+          speed_down_3:    { offset: 20, type: word }  # D1020 (75%)
+
+      status_word:
+        device: "D1100"
+        bits:
+          hold: 0
+          emergency_stop: 1
+          fault_reset: 2
+          device_home: 3
+          robot_home: 4
+          standby: 5
+
+      # 사진으로 확인한 No.9~17 직접 제어 맵. emergency_stop(D1100.1)은
+      # 상태 readback에만 포함하며 네트워크 쓰기 허용 목록에는 넣지 않는다.
+      direct_controls:
+        speed:
+          speed_25: { device: "D1016", active_value: 25 }
+          speed_50: { device: "D1018", active_value: 50 }
+          speed_75: { device: "D1020", active_value: 75 }
+        control_word:
+          device: "D1100"
+          bits:
+            hold: 0
+            emergency_stop: 1
+            fault_reset: 2
+            device_home: 3
+            robot_home: 4
+            standby: 5
+        writable:
+          field: [speed_25, speed_50, speed_75, hold, fault_reset, device_home, robot_home, standby]
+          sim: [speed_25, speed_50, speed_75, hold, fault_reset, device_home, robot_home, standby]
+        action_pulse_seconds: 0.25
+
+      # 이전 D2000/D3000 가상 PLC 호환용이다. 위의 현장 직접 제어 맵과
+      # 섞어 쓰지 않으며 field 서비스는 이 블록으로 쓰지 않는다.
+      legacy_sim_commands:
+        motion:
+          device: "D2000"
+          words: 3
+          fields: { run: 0, hold: 1, stop: 2 }
+        speed:
+          device: "D3000"
+          words: 3
+          fields: { speed_down_1: 0, speed_down_2: 1, speed_down_3: 2 }
 
   - id: unloading
-    label: "현대 언로딩 로봇 (HH050)"
-    enabled: false                         # 3차년도 실증 대상 ② 확정 후 true
-    plc_profile_block: read_block
-    axis_names: [S, L, U, R, B, T]
+    label: "현대 언로딩 로봇 (모델/PLC 맵 미확정)"
+    enabled: false
     calibrated: false
-    scale:  [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]
-    dir:    [1, 1, 1, 1, 1, 1]
+    axis_names: [J1, J2, J3, J4, J5, J6]
+    scale:  [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+    dir:
+      field: [1, 1, 1, 1, 1, 1]
+      sim:   [1, 1, 1, 1, 1, 1]
     offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    visual_dir:    [1, 1, 1, 1, 1, 1]
+    visual_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     limits_deg:
-      min: [-180, -90,  -90, -180, -135, -360]
-      max: [ 180, 155,  255,  180,  135,  360]
-    topics:
-      memory:  "/robot/unloading/memory"
-      pose:    "/robot/unloading/cmd_degs"
-      state:   "/robot/unloading/state"
-      command: "/robot/unloading/command"
-      mode:    "/robot/unloading/mode"
-
-# ============================================================================
-#  작업자 (사람 pose) — MVP 융합 결과를 그대로 구독
-#  ※ 발행측은 [SB] Multiview Human Pose Estimation / multiview_pose
-# ============================================================================
+      min: [-360, -360, -360, -360, -360, -360]
+      max: [ 360,  360,  360,  360,  360,  360]
+    plc_map: null                  # PLC 담당자가 별도 범위를 확정하기 전까지 비활성
 
 workers:
-  topic_prefix: "/worker/pose"      # /worker/pose0_joints … /worker/pose4_joints
+  topic_prefix: "/worker/pose"
   suffix: "_joints"
   max_bodies: 5
   joints: 28
   frame_id: "stag_marker"
-  stale_timeout_ms: 500             # 이 시간 넘게 미수신이면 Unity 에서 숨김
-
-# ============================================================================
-#  Unity 어댑터 — 커스텀 msg 를 std_msgs 로 변환해 Unity 가 코드젠 없이 받게 함
-# ============================================================================
+  stale_timeout_ms: 500
 
 unity:
   ros_tcp_endpoint:
     host: "0.0.0.0"
     port: 10000
-  state_layout:                     # Int32MultiArray 순서 (Unity 와 동일해야 함)
+  state_layout:
     - run
     - hold
     - emergency_stop
@@ -76,7 +145,7 @@ unity:
     - speed_down_2
     - speed_down_3
     - operation_state
-  command_layout:                   # Unity → ROS 2 명령 순서
+  command_layout:
     - run
     - hold
     - stop

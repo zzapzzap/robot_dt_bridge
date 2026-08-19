@@ -1,130 +1,62 @@
-# 안전 모드 — 서비스 · 토픽
+# PLC 상태와 제어 서비스
 
-정상 운전 / 속도제한 3단 / 보호정지 / 비상정지를 **하나의 모드 값**으로 다룬다.
-설정은 서비스, 방송은 토픽이다.
+## 운영 원칙
 
----
+- `/control_state`는 PLC command/register readback이다.
+- 아래쪽 service request는 Jetson이 요청한 값이다.
+- MC write ACK는 robot actual confirmation이 아니다.
+- Unity command topic과 legacy `mode_cli`는 public PLC 쓰기 경로가 아니다.
+- Ethernet command는 safety-rated E-stop/SLS가 아니다.
 
-## 1. 모드 정의
+## 서비스
 
-| 값 | 식별자 | 라벨 | 결과 속도 | PLC 필드 | PLC 기록 |
-|---|---|---|---|---|---|
-| 1 | `NORMAL` | 정상 운전 · 전속 | **100 %** | `run` | `D2000=[1,0,0]` |
-| 2 | `REDUCED_SPEED_75` | 속도제한 75 % | **75 %** | `speed_down_1` | `D3000=[1,0,0]` |
-| 3 | `REDUCED_SPEED_50` | 속도제한 50 % | **50 %** | `speed_down_2` | `D3000=[0,1,0]` |
-| 4 | `REDUCED_SPEED_25` | 속도제한 25 % | **25 %** | `speed_down_3` | `D3000=[0,0,1]` |
-| 5 | `PROTECTIVE_STOP` | 보호정지 (전원 유지) | 0 % | `hold` | `D2000=[0,1,0]` |
-| 6 | `EMERGENCY_STOP` | 비상정지 | 0 % | `stop` | `D2000=[0,0,1]` |
-
-### 왜 「감속 N」을 버렸나
-
-`감속 2 (50 %)` 는 **50 % 를 줄인다**는 뜻인지 **50 % 로 달린다**는 뜻인지 갈린다.
-실제로 이 저장소 안에서 한쪽은 25 %, 다른 쪽은 75 % 로 적혀 정반대 값이 돌아다녔다.
-
-그래서 **이름에 결과 속도를 박아 넣었다.**
-
-```
-REDUCED_SPEED_50   =   전속의 50 % 로 운전
-```
-
-이름의 숫자와 `speed_ratio` 필드가 **항상 같다.** 어긋날 수가 없는 구조다.
-(회귀 시험에서 `REDUCED_SPEED_(\d+)` 와 `speed_ratio` 일치를 자동 검사한다.)
-
-PLC 필드명 `speed_down_N` 은 에이시스 사양서 계약이라 그대로 두고,
-**숫자를 뒤집는 지점은 `MODE_FIELD` 표 하나뿐**이다.
-
-```
-speed_down_1 (25 % 감속)  →  REDUCED_SPEED_75  (속도 75 %)
-speed_down_3 (75 % 감속)  →  REDUCED_SPEED_25  (속도 25 %)
-```
-
-### 정지 용어
-
-ISO 10218 / ISO-TS 15066 을 따른다.
-
-| | 뜻 |
-|---|---|
-| `PROTECTIVE_STOP` | 전원을 유지한 채 멈춤. 원인이 해소되면 복귀 가능 |
-| `EMERGENCY_STOP` | 비상정지 |
-
-## 2. 설정 — 서비스
-
-```bash
-# CLI
-ros2 run robot_bridge mode_cli reduced50 --reason "작업자 접근"
-ros2 run robot_bridge mode_cli estop
-ros2 run robot_bridge mode_cli rs25 --hold 10        # 10초만 유지
-ros2 run robot_bridge mode_cli normal --clear        # 정지 고정까지 해제
-
-# 원형
-ros2 service call /robot/loading/set_mode robot_bridge_msgs/srv/SetSafetyMode \
-  "{mode: 3, source: 'operator', reason: '작업자 접근', hold_seconds: 0.0}"
-```
-
-CLI 는 `normal` `rs50` `reduced25` `estop` `pstop` · 한글 `전속` `속도50` `비상정지` ·
-모드 번호 `3` · 구 표기 `감속2` 를 모두 받는다.
-
-| 필드 | 뜻 |
-|---|---|
-| `hold_seconds` | `0` = 다음 설정 전까지 무기한 · `>0` = 그 시간 뒤 자동 해제 |
-| `clear_latched` | 기존 고정 지령을 먼저 풀고 적용. **정지 고정을 푸는 유일한 방법** |
-| 응답 `accepted` | 우선순위에 밀리면 `false` 와 사유 반환 |
-
-## 3. 조회 · 감시
-
-```bash
-ros2 run robot_bridge mode_cli --get        # 1회 조회
-ros2 run robot_bridge mode_cli --watch      # 변화 시 한 줄씩
-ros2 topic echo /robot/loading/mode         # 원본 메시지
-```
-
-## 4. 토픽 vs 서비스 — 언제 뭘 쓰나
-
-| | 토픽 `RobotCommand` | 서비스 `SetSafetyMode` |
+| service | PLC request | 확인 가능한 것 |
 |---|---|---|
-| 쓰는 쪽 | XDI · XAG — 계속 판단해서 쏘는 자동 로직 | 운전원 · 상위 시스템 · 시험 |
-| 유지 | **300 ms 후 소멸** (주기 발행 전제) | **고정(latch)** — 풀 때까지 유지 |
-| 의도 | "지금 이 순간의 판단" | "지금부터 이 모드로 두어라" |
+| `set_speed_percent(25)` | `D1016=25`, 나머지 감속 WORD=0 | register echo |
+| `set_speed_percent(50)` | `D1018=50`, 나머지 감속 WORD=0 | register echo |
+| `set_speed_percent(75)` | `D1020=75`, 나머지 감속 WORD=0 | register echo |
+| `set_speed_percent(100)` | 세 감속 WORD 모두 0 | register echo |
+| `set_hold(true/false)` | `D1100.0` masked set/clear | `register_readback` |
+| `trigger_action(1..4)` | `D1100.2~5` 0.25초 pulse | assert/clear readback |
 
-자동 로직이 주기 발행을 멈추면 지령이 저절로 풀리는 게 안전하다. 반대로 운전원이
-"속도제한 50 % 로 두고 작업" 하려면 고정이 필요하다. 그래서 경로를 둘로 나눴다.
+`100%`는 세 감속 WORD 해제만 수행하고 자동 START하지 않는다. `D1100.1`은
+정지/비상정지 표기 상태로만 읽으며 쓰기 서비스가 없다.
 
-## 5. 중재 규칙
+```bash
+ros2 service call /robot/loading/set_speed_percent \
+  robot_bridge_msgs/srv/SetSpeedPercent "{speed_percent: 50.0}"
 
-```
-우선순위   EMERGENCY_STOP 100 > PROTECTIVE_STOP 80
-           > REDUCED_25 60 > REDUCED_50 40 > REDUCED_75 20 > NORMAL 0
-```
+ros2 service call /robot/loading/set_hold \
+  robot_bridge_msgs/srv/SetHold "{hold: true}"
 
-1. 높은 우선순위가 이긴다. 동순위면 **고정 > 토픽**, 그다음 최신
-2. 서비스로 `NORMAL` 을 요청하면 속도제한 고정도 함께 풀린다
-3. 단 **정지 고정은 `--clear` 없이는 안 풀린다** (안전상 의도)
-4. PLC 링크 두절 시 `fail_safe`(기본 `PROTECTIVE_STOP`)가 **모든 지령보다 우선**
-
-### 실제 동작 (검증됨)
-
-```
-서비스 REDUCED_SPEED_50 고정  → REDUCED_SPEED_50  50 %  [operator] 고정 무기한
-0.4초 후                      → 유지                          ← 토픽이면 소멸했을 시점
-XDI 정지 토픽 끼어듦           → EMERGENCY_STOP    0 %  [xdi]
-XDI 소멸(0.3초)               → REDUCED_SPEED_50 로 복귀      ← 밑에 깔린 고정이 살아남
-NORMAL 요청                   → NORMAL          100 %        ← 속도제한 고정 해제됨
-정지 고정 후 NORMAL 요청       → 거절 "우선순위가 낮아…"
-정지 고정 후 --clear          → NORMAL                       ← 명시적 해제
-링크 두절                     → PROTECTIVE_STOP [watchdog]
+ros2 service call /robot/loading/trigger_action \
+  robot_bridge_msgs/srv/TriggerRobotAction "{action: 1}"
 ```
 
-## 6. Unity 표시
+## 응답 해석
 
-`/robot/<id>/mode_unity` (`Int32MultiArray[4]` = `[모드, 속도%, 링크정상, 고정여부]`)를
-`RobotStateReceiver` 가 구독해 라벨에 표시한다.
+| 필드 | 의미 |
+|---|---|
+| `accepted` | config, permission, 입력값을 통과함 |
+| `controller_ack` | PLC가 MC write를 정상 응답함 |
+| `confirmed` | 후속 actual feedback/ack가 목표와 일치함 |
+| `register_readback` | 명령 주소를 다시 읽어 요청값/clear를 확인함 |
 
-```
-속도제한 50 %   (op 1)
-지령 속도제한 50 % · 속도 50 % [고정]
-```
+public field launch에서는 `FIELD_WRITE_OPT_IN_REQUIRED`로 fail-closed한다.
+command register echo만으로 `confirmed=true`를 만들지 않는다.
 
-**위 줄은 PLC 가 실제로 보고한 상태**, **아래 줄은 우리가 내린 지령**이다.
-둘이 오래 어긋나면 명령이 안 먹고 있다는 뜻이므로, 현장 디버깅에 쓰인다.
+## 정지와 비상정지
 
-C# 쪽 `SafetyLevel` enum 도 같은 규칙이다 — `ReducedSpeed50` = 전속의 50 %.
+`request_stop`은 PLC의 일반 공정 정지 request다. 기존 코드가 D2002를
+`MODE_EMERGENCY_STOP`이라고 부르던 것은 안전 의미를 과장하므로 public gateway에서
+사용하지 않는다. 실제 비상정지는 물리 버튼, 안전 PLC, robot safety controller가
+담당한다. PLC의 D1100.1 bit는 읽기 전용 command/status register로만 표시한다.
+
+링크가 끊긴 뒤 Jetson이 같은 Ethernet으로 hold/stop을 보낼 수는 없다. PLC ladder가
+Jetson heartbeat timeout을 감시하고 자체적으로 안전한 제한 상태로 전환해야 한다.
+
+## 호환 코드
+
+`safety_gate.py`, `robot_memory_node.py`, `mode_cli`는 이전 프로토타입 호환을 위해
+남아 있지만 `robot_system.launch.py`에서 실행하지 않는다. 특히 legacy node는
+주기 command rewrite 설계이므로 field 운영에 직접 사용하지 않는다.

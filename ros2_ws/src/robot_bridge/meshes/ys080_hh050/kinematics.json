@@ -1,0 +1,223 @@
+{
+  "robot": {
+    "maker": "HD Hyundai Robotics",
+    "model": "YS080 / HH050 (HDR50-22)",
+    "reach_mm": 2239,
+    "dof": 6,
+    "units_mesh": "mm",
+    "export_scale_to_m": 0.001,
+    "source_step": "[에이시스] 로봇도면/YS080(HH050)-11 rev1.STEP"
+  },
+  "axis_name_sets": {
+    "loading": [
+      "S",
+      "H",
+      "V",
+      "R2",
+      "B",
+      "R1"
+    ],
+    "unloading": [
+      "S",
+      "L",
+      "U",
+      "R",
+      "B",
+      "T"
+    ]
+  },
+  "note": "axis_dir_cad = 회전축 라인 방향(CAD 실린더면 검출). 부호(+회전방향)는 데이터시트/home 기준으로 확정 필요. joint_origin은 축선 위 점.",
+  "chain": [
+    {
+      "name": "BASE",
+      "parent": null,
+      "type": "fixed",
+      "joint_origin_mm": [
+        0,
+        0,
+        0
+      ],
+      "mesh": "meshes/BASE.obj"
+    },
+    {
+      "name": "J1_S",
+      "parent": "BASE",
+      "type": "revolute",
+      "joint_origin_mm": [
+        0.0,
+        0.0,
+        280.0
+      ],
+      "axis_dir_cad": [
+        -0.0,
+        -0.0,
+        -1.0
+      ],
+      "limit_deg": [
+        -180,
+        180
+      ],
+      "speed_dps": 170,
+      "axis_name": {
+        "loading": "S",
+        "unloading": "S"
+      },
+      "mesh": "meshes/J1_S.obj",
+      "centroid_mm": [
+        135.0,
+        -0.0,
+        403.3
+      ]
+    },
+    {
+      "name": "J2_H",
+      "parent": "J1_S",
+      "type": "revolute",
+      "joint_origin_mm": [
+        320.0,
+        110.0,
+        480.0
+      ],
+      "axis_dir_cad": [
+        -0.0,
+        -1.0,
+        -0.0
+      ],
+      "limit_deg": [
+        -65,
+        170
+      ],
+      "speed_dps": 140,
+      "axis_name": {
+        "loading": "H",
+        "unloading": "L"
+      },
+      "mesh": "meshes/J2_H.obj",
+      "centroid_mm": [
+        320.0,
+        10.7,
+        903.5
+      ]
+    },
+    {
+      "name": "J3_V",
+      "parent": "J2_H",
+      "type": "revolute",
+      "joint_origin_mm": [
+        320.0,
+        70.0,
+        1350.0
+      ],
+      "axis_dir_cad": [
+        0.0,
+        1.0,
+        -0.0
+      ],
+      "limit_deg": [
+        -80,
+        180
+      ],
+      "speed_dps": 160,
+      "axis_name": {
+        "loading": "V",
+        "unloading": "U"
+      },
+      "mesh": "meshes/J3_V.obj",
+      "centroid_mm": [
+        633.8,
+        -5.2,
+        1435.0
+      ]
+    },
+    {
+      "name": "J4_R2",
+      "parent": "J3_V",
+      "type": "revolute",
+      "joint_origin_mm": [
+        1217.0,
+        0.0,
+        1550.0
+      ],
+      "axis_dir_cad": [
+        -1.0,
+        -0.0,
+        -0.0
+      ],
+      "limit_deg": [
+        -360,
+        360
+      ],
+      "speed_dps": 230,
+      "axis_name": {
+        "loading": "R2",
+        "unloading": "R"
+      },
+      "mesh": "meshes/J4_R2.obj",
+      "centroid_mm": [
+        1262.5,
+        0.0,
+        1550.0
+      ]
+    },
+    {
+      "name": "J5_B",
+      "parent": "J4_R2",
+      "type": "revolute",
+      "joint_origin_mm": [
+        1350.0,
+        -0.0,
+        1550.0
+      ],
+      "axis_dir_cad": [
+        0.0,
+        -1.0,
+        -0.0
+      ],
+      "limit_deg": [
+        -125,
+        125
+      ],
+      "speed_dps": 230,
+      "axis_name": {
+        "loading": "B",
+        "unloading": "B"
+      },
+      "mesh": "meshes/J5_B.obj",
+      "centroid_mm": [
+        1370.0,
+        1.0,
+        1550.0
+      ]
+    },
+    {
+      "name": "J6_R1",
+      "parent": "J5_B",
+      "type": "revolute",
+      "joint_origin_mm": [
+        1392.0,
+        -0.0,
+        1550.0
+      ],
+      "axis_dir_cad": [
+        -1.0,
+        -0.0,
+        0.0
+      ],
+      "limit_deg": [
+        -360,
+        360
+      ],
+      "speed_dps": 350,
+      "axis_name": {
+        "loading": "R1",
+        "unloading": "T"
+      },
+      "mesh": "meshes/J6_R1.obj",
+      "centroid_mm": [
+        1406.1,
+        -12.1,
+        1550.0
+      ]
+    }
+  ]
+}

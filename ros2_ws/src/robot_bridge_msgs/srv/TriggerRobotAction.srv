@@ -1,0 +1,24 @@
+# D1100의 순간 동작 비트 중 하나를 요청한다.
+# 비상정지는 의도적으로 제공하지 않으며 읽기 상태로만 노출한다.
+
+uint8 ACTION_FAULT_RESET = 1
+uint8 ACTION_DEVICE_HOME = 2
+uint8 ACTION_ROBOT_HOME = 3
+uint8 ACTION_STANDBY = 4
+
+string request_id
+string source
+string reason
+uint8 action
+float32 confirmation_timeout_sec
+---
+# controller_ack는 PLC transport가 쓰기 요청에 정상 응답했음을 뜻한다.
+# register_readback은 해당 명령 레지스터를 별도로 다시 읽었음을 뜻한다.
+# 순간 pulse는 readback 시점에 이미 0일 수 있으므로 로봇 동작 완료를 뜻하지 않는다.
+bool accepted
+bool controller_ack
+bool register_readback
+robot_bridge_msgs/RobotControlState control_state
+string request_id
+string error_code
+string message

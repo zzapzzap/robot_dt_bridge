@@ -5,7 +5,7 @@
 
     python3 tools/plc_scan.py                       # 전자동
     python3 tools/plc_scan.py --subnet 192.168.0.0/24
-    python3 tools/plc_scan.py --host 192.168.0.10   # IP 는 아는데 포트를 모를 때
+    python3 tools/plc_scan.py --host 192.168.10.30  # 승인된 PLC 한 대만 대상으로
     python3 tools/plc_scan.py --passive 20          # 수동 청취만 (아무것도 안 보냄)
 
 탐색 원리
@@ -48,12 +48,15 @@ from robot_bridge.mc_client import (  # noqa: E402
     CMD_BATCH_READ, SUB_WORD, END_CODES, McClient, McConfig, McError, parse_device,
 )
 
-# MELSEC 계열에서 실제로 자주 열려 있는 포트들
+# MELSEC 계열 후보. 제공 QnU/L 매뉴얼에서 시스템 예약인 5000~5009는
+# 의도적으로 제외한다. 생산망 능동 탐색은 현장 승인을 받은 host에만 수행한다.
 CANDIDATE_PORTS = [
-    5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5010, 5011, 5012,
+    9000,          # 현장 GX Works Receive/MC 응답 확인 포트
+    9001,          # 현장 Fixed Buffer Send 포트: MC 식별 실패가 정상일 수 있음
+    5010, 5011, 5012,
     1281,          # MELSOFT / GX 계열
     2000, 2001,
-    4999, 5008, 5009,
+    4999,
     45237, 45238,  # 일부 iQ-R 구성
     502,           # Modbus/TCP 로 뚫려 있는 경우 (MC 아님 — 참고용)
 ]
@@ -365,18 +368,13 @@ def main() -> int:
 
     # 특정 호스트만
     if a.host:
-        hr(f"지정 호스트 {a.host} — 포트 {len(ports)}개 확인")
-        opens = []
-        with ThreadPoolExecutor(max_workers=64) as ex:
-            futs = {ex.submit(tcp_open, a.host, p, 1.0): p for p in ports}
-            for f in as_completed(futs):
-                if f.result():
-                    p = futs[f]
-                    opens.append((a.host, p))
-                    print(f"  {C_OK}▸ 열림{C_END} {a.host}:{p}")
-        if not opens:
-            print(f"  {C_WARN}열린 포트 없음{C_END} — 개방 설정 또는 방화벽 확인")
-        return report(probe_all(sorted(opens)))
+        # Do not connect merely to test whether a port is open and then
+        # reconnect immediately for MC identification.  A GX Works
+        # ``Unpassive`` open can need time to recycle the first session, so
+        # that sacrificial TCP check can make a valid MC port look silent.
+        # The MC identification request itself is also an adequate port test.
+        targets = [(a.host, port) for port in ports]
+        return report(probe_all(targets))
 
     local = show_interfaces()
     candidates: List[str] = []

@@ -16,8 +16,11 @@ setup(
     maintainer_email="jhlee@sierrabase.co.kr",
     description="PLC · 작업자 pose 시뮬레이터",
     license="Proprietary",
+    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
+            "fake_hi6 = robot_bridge_sim.fake_hi6:main",
+            "fake_plc = robot_bridge_sim.fake_plc:main",
             "fake_plc_node = robot_bridge_sim.fake_plc_node:main",
             "fake_worker_node = robot_bridge_sim.fake_worker_node:main",
         ],

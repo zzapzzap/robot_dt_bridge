@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<!--
+  RViz debug description reconstructed from the user-supplied YS080/HH050 CAD.
+
+  The meshes are expressed in the original global CAD frame (millimetres), so
+  every moving link uses the negative global joint origin as its visual offset.
+  Joint axes and origins come from meshes/ys080_hh050/kinematics.json.
+
+  IMPORTANT: controller-positive directions and controller-zero versus CAD-home
+  offsets still require one-axis-at-a-time FAT.  Do not use this model for
+  collision clearance, safety limits, or offline programming.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"
+       name="ys080_hh050_debug">
+
+  <xacro:arg name="mesh_root"
+             default="package://robot_bridge/meshes/ys080_hh050"/>
+
+  <material name="base_gray">
+    <color rgba="0.28 0.31 0.35 1.0"/>
+  </material>
+  <material name="joint_1_red">
+    <color rgba="0.78 0.12 0.10 1.0"/>
+  </material>
+  <material name="joint_2_green">
+    <color rgba="0.10 0.58 0.22 1.0"/>
+  </material>
+  <material name="joint_3_blue">
+    <color rgba="0.12 0.32 0.82 1.0"/>
+  </material>
+  <material name="joint_4_bronze">
+    <color rgba="0.72 0.39 0.13 1.0"/>
+  </material>
+  <material name="joint_5_violet">
+    <color rgba="0.56 0.20 0.72 1.0"/>
+  </material>
+  <material name="joint_6_cyan">
+    <color rgba="0.05 0.62 0.68 1.0"/>
+  </material>
+
+  <xacro:macro name="cad_link" params="name mesh offset material_name">
+    <link name="${name}">
+      <visual>
+        <origin xyz="${offset}" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="$(arg mesh_root)/${mesh}.obj"
+                scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="${material_name}"/>
+      </visual>
+    </link>
+  </xacro:macro>
+
+  <xacro:cad_link name="base_link" mesh="BASE"
+                  offset="0 0 0" material_name="base_gray"/>
+  <xacro:cad_link name="link_1" mesh="J1_S"
+                  offset="0 0 -0.280" material_name="joint_1_red"/>
+  <xacro:cad_link name="link_2" mesh="J2_H"
+                  offset="-0.320 -0.110 -0.480"
+                  material_name="joint_2_green"/>
+  <xacro:cad_link name="link_3" mesh="J3_V"
+                  offset="-0.320 -0.070 -1.350"
+                  material_name="joint_3_blue"/>
+  <xacro:cad_link name="link_4" mesh="J4_R2"
+                  offset="-1.217 0 -1.550"
+                  material_name="joint_4_bronze"/>
+  <xacro:cad_link name="link_5" mesh="J5_B"
+                  offset="-1.350 0 -1.550"
+                  material_name="joint_5_violet"/>
+  <xacro:cad_link name="link_6" mesh="J6_R1"
+                  offset="-1.392 0 -1.550"
+                  material_name="joint_6_cyan"/>
+
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0.280" rpy="0 0 0"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="-3.141593" upper="3.141593"
+           effort="1000" velocity="2.967060"/>
+  </joint>
+
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <origin xyz="0.320 0.110 0.200" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="-1.134464" upper="2.967060"
+           effort="1000" velocity="2.443461"/>
+  </joint>
+
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2"/>
+    <child link="link_3"/>
+    <origin xyz="0 -0.040 0.870" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.396263" upper="3.141593"
+           effort="1000" velocity="2.792527"/>
+  </joint>
+
+  <joint name="joint_4" type="revolute">
+    <parent link="link_3"/>
+    <child link="link_4"/>
+    <origin xyz="0.897 -0.070 0.200" rpy="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="-6.283185" upper="6.283185"
+           effort="500" velocity="4.014257"/>
+  </joint>
+
+  <joint name="joint_5" type="revolute">
+    <parent link="link_4"/>
+    <child link="link_5"/>
+    <origin xyz="0.133 0 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="-2.181662" upper="2.181662"
+           effort="500" velocity="4.014257"/>
+  </joint>
+
+  <joint name="joint_6" type="revolute">
+    <parent link="link_5"/>
+    <child link="link_6"/>
+    <origin xyz="0.042 0 0" rpy="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="-6.283185" upper="6.283185"
+           effort="300" velocity="6.108652"/>
+  </joint>
+
+</robot>

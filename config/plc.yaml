@@ -1,37 +1,56 @@
-# ============================================================================
-#  공정 PLC (MITSUBISHI MELSEC) 접속 · 메모리 할당 설정
-#  ---------------------------------------------------------------------------
-#  이 파일 하나만 고치면 브리지 전체가 따라간다.
-#  현장 반입 전에는 sim 프로파일로, 반입 후에는 field 프로파일로 실행한다.
+# =============================================================================
+# 공정 PLC 접속 프로파일 (Mitsubishi MELSEC MC/SLMP)
+# -----------------------------------------------------------------------------
+# 실제 데이터 경로는 `현대 로봇 <-> 공정 PLC <-> Jetson` 이다.
+# Jetson은 로봇 컨트롤러나 PLC를 대체하지 않고, PLC가 래더에서 D 디바이스로
+# 미러링한 로봇 상태를 읽고 PLC에 "요청"만 기록한다.
 #
-#    ros2 launch robot_bridge bringup.launch.py profile:=sim
-#    ros2 launch robot_bridge bringup.launch.py profile:=field
-# ============================================================================
+# 192.168.10.30:9000에서 MC 3E Binary 읽기는 현장 확인했다.
+# 다만 D 레지스터의 의미와 축 scale/dir/offset은 아직 교정 전이므로
+# commissioned=false를 유지한다. 이 상태에서도 읽기 전용 RViz 확인은
+# 가능하지만, commands_enabled/start_enabled를 절대 올리지 않는다.
+# =============================================================================
+
+schema_version: 1
 
 profiles:
-
-  # ------------------------------------------------------------------ 실장비
   field:
+    commissioned: false           # 주소/단위/축 부호/영점 FAT 완료 전에는 false
+    commands_enabled: false       # legacy D2000/D3000 경로는 계속 잠금
+    start_enabled: false          # 운전 요청은 별도 현장 승인 후 마지막에 true
+    poll_hz: 20.0
+    status_publish_hz: 20.0
+    stale_timeout_ms: 500
+    verify_timeout_s: 2.0
+    allowed_speed_percent: [25, 50, 75, 100]
     connection:
-      host: 192.168.0.10          # [확인필요] PLC 내장 Ethernet IP (에이시스 확인)
-      port: 5000                  # [확인필요] MC 프로토콜 개방 포트
-      frame: "3E"                 # QnUCPU = 3E / iQ-R = 4E
-      protocol: "binary"          # binary | ascii  (binary 권장 — 프레임 절반)
-                                  # 모르면 tools/plc_scan.py 가 찾아 준다
-      network_no: 0x00            # 자국 접속이면 0
-      pc_no: 0xFF                 # 자국 CPU = 0xFF
-      io_no: 0x03FF               # 자국 CPU 모듈 = 0x03FF
+      host: "192.168.10.30"       # 현장 ping/ARP 확인됨 (2026-08-18)
+      port: 9000                   # 현장 MC 3E Binary batch-read 확인 (2026-08-18)
+      source_address: "192.168.10.61" # Jetson eno1 영구 고정 IP (2026-08-18 적용)
+      frame: "3E"                 # QnUCPU=3E, iQ-R=4E (CPU 확인 필요)
+      protocol: "binary"          # PLC Open Setting의 binary/ascii와 일치
+      network_no: 0x00
+      pc_no: 0xFF
+      io_no: 0x03FF
       station_no: 0x00
-      monitor_timer_250ms: 16     # 감시 타이머 16 × 250 ms = 4 s
+      monitor_timer_250ms: 16
       connect_timeout_s: 3.0
       read_timeout_s: 1.0
       reconnect_backoff_s: [0.5, 1.0, 2.0, 5.0]
 
-  # ------------------------------------------------- PLC 없이 검증 (내장 시뮬)
   sim:
+    commissioned: true
+    commands_enabled: true
+    start_enabled: true
+    poll_hz: 20.0
+    status_publish_hz: 20.0
+    stale_timeout_ms: 500
+    verify_timeout_s: 1.0
+    allowed_speed_percent: [25, 50, 75, 100]
     connection:
-      host: 127.0.0.1
+      host: "127.0.0.1"
       port: 5010
+      source_address: null
       frame: "3E"
       protocol: "binary"
       network_no: 0x00
@@ -43,73 +62,9 @@ profiles:
       read_timeout_s: 0.5
       reconnect_backoff_s: [0.3, 0.6, 1.0]
 
-# ============================================================================
-#  D 레지스터 맵  —  에이시스 「XAI 통합 현대로봇 사양 정리(’26.6.18)」 기준
-#  ---------------------------------------------------------------------------
-#  offset 은 read_block.head 로부터의 워드 오프셋이다.
-#  DWORD 는 하위워드(offset) + 상위워드(offset+1), 리틀엔디언 signed 32bit.
-# ============================================================================
-
-read_block:
-  head: "D1000"
-  words: 14                       # D1000 ~ D1013
-  poll_hz: 20                     # 사양 18 Hz(55.1 ms) 이상 — 20 Hz 로 여유
-
-status:
-  operation_state: { offset: 0,  type: word }     # D1000 로봇 운전상태
-
-axes:                             # 로딩 [S,H,V,R2,B,R1] / 언로딩 [S,L,U,R,B,T]
-  - { name: J1, offset: 2,  type: dword }         # D1002
-  - { name: J2, offset: 4,  type: dword }         # D1004
-  - { name: J3, offset: 6,  type: dword }         # D1006
-  - { name: J4, offset: 8,  type: dword }         # D1008
-  - { name: J5, offset: 10, type: dword }         # D1010
-  - { name: J6, offset: 12, type: dword }         # D1012
-
-# 상태 비트 — D1100 워드의 비트 위치
-status_bits:
-  word: "D1100"
-  bits:
-    hold:          0
-    emergency_stop: 1
-    fault_reset:   2
-    device_home:   3
-    robot_home:    4
-    standby:       5
-
-# ============================================================================
-#  쓰기(명령) 맵  —  XAI → 통합 컨트롤러 → PLC
-#    버퍼1 (긴급)  RwrD2000~2002 : 운전 / 일시정지 / 정지
-#    버퍼2 (정밀)  RwrD3000~3002 : 감속 1(25%) / 2(50%) / 3(75%)
-#  ※ RwrDxxxx 는 CC-Link 버퍼 미러 표기이며, PLC 측 실 디바이스 주소는
-#    아래 device 값으로 매핑한다.  [에이시스 확인요청] 실 주소 확정
-# ============================================================================
-
-write_block:
-  emergency:
-    device: "D2000"               # [확인필요] RwrD2000 대응 실 디바이스
-    words: 3
-    fields: { run: 0, hold: 1, stop: 2 }
-  slowdown:
-    device: "D3000"               # [확인필요] RwrD3000 대응 실 디바이스
-    words: 3
-    fields: { speed_down_1: 0, speed_down_2: 1, speed_down_3: 2 }
-  # 명령 write 는 이벤트 기반이지만, 워치독 유지를 위해 주기 재기록도 수행
-  rewrite_hz: 19                  # 사양 51.1 ms → 최대 19 회/s
-
-# ============================================================================
-#  안전 게이트  —  명령 중재 · 워치독
-# ============================================================================
-
+# 통신 두절 때 Jetson이 같은 끊어진 Ethernet 경로로 로봇을 정지시킬 수는 없다.
+# 아래 값은 ROS 상태를 stale/unknown으로 만드는 시간 기준일 뿐이다. 실제 정지는
+# PLC 래더 워치독과 안전회로가 담당해야 한다.
 safety:
-  # 우선순위 : 값이 클수록 우선. 동시 수신 시 높은 쪽이 이긴다.
-  priority:
-    stop: 100                     # 비상정지
-    hold: 80                      # 일시정지
-    speed_down_3: 60              # 75 % 감속
-    speed_down_2: 40
-    speed_down_1: 20
-    run: 0
-  command_timeout_ms: 300         # 이 시간 내 갱신 없으면 지령 소멸
-  watchdog_timeout_ms: 500        # PLC 읽기 끊기면 안전측(정지) 발행
-  fail_safe: "hold"               # 통신 두절 시 취할 상태 : hold | stop | none
+  stale_timeout_ms: 500
+  fail_safe_state: "unknown"

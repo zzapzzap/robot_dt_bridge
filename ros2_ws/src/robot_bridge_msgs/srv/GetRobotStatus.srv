@@ -1,0 +1,18 @@
+# 최근 RobotStatus를 조회한다.
+# force_controller_read가 false이면 서버가 연속 상태 토픽의 캐시를 반환할 수 있다.
+# max_age_sec가 0이면 서버 기본 freshness 기준을 사용한다.
+
+bool force_controller_read
+float32 max_age_sec
+---
+# success는 actual이 있고 max_age_sec 또는 서버 freshness 기준을 만족함을 뜻한다.
+# 실패해도 진단을 위해 stale actual이 반환될 수 있다.
+bool success
+# controller_ack는 이 호출에서 upstream(PLC/controller) 실시간 읽기가 성공했음을 뜻한다.
+# false여도 from_cache가 true이면 마지막 actual이 반환될 수 있다.
+bool controller_ack
+bool from_cache
+bool fresh
+robot_bridge_msgs/RobotStatus actual
+string error_code
+string message

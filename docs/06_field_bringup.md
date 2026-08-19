@@ -1,222 +1,130 @@
-# 현장 투입 절차 — 랜선 꽂고 나서 무엇을 하나
+# PLC 현장 투입 절차
 
-**이 문서 하나만 위에서부터 따라가면 된다.** 각 단계는 「명령 → 기대 결과 → 아니면」
-구조다. 막히는 지점에서 바로 다음 행동이 정해진다.
+각 단계가 통과하기 전에는 다음 단계, 특히 write 단계로 넘어가지 않는다.
 
-> 준비물 : Jetson AGX Orin · 랜선 · (가능하면) 에이시스 담당자 연락처
-
----
-
-## 0. 클론 · 빌드  (로봇 연결 전에 미리)
+## 0. 사무실에서 simulation 확인
 
 ```bash
-git clone https://github.com/zzapzzap/robot_dt_bridge.git
-cd robot_dt_bridge/ros2_ws
-colcon build --symlink-install
+cd /home/sb/colcon_ws
+colcon build --packages-select robot_bridge_msgs robot_bridge_sim robot_bridge \
+  --symlink-install
 source install/setup.bash
+ros2 launch robot_bridge robot_system.launch.py
 ```
 
-**기대** : 3개 패키지 빌드 성공.
-**아니면** : `robot_bridge_msgs` 부터 실패하면 rosidl 문제다. `sudo apt install
-ros-humble-rosidl-default-generators` 후 재시도.
-
-### 로봇 없이 전 구간 확인
+인자를 생략하면 `sim:=true debug:=true`다. 시뮬레이션은
+PLC 축좌표 `S=38.56, H=136.25, V=-49.48, R2=0.17, B=-86.85,
+R1=-50.68` degree(raw `[3856, 13625, -4948, 17, -8685, -5068]`)와
+`Hold=true`로 시작한다. sim/field 모두 controller 좌표는 원본 부호를
+유지하고, RViz/Unity에는 `[-S,H-90,-V,-R2,B,-R1]`을 적용한다.
+위 자세의 시각화 값은 `[-38.56, 46.25, 49.48, -0.17, -86.85, 50.68]`이다.
+다음 서비스로 Hold를 해제하고 가상 자세 변화를 시작한다.
 
 ```bash
-ros2 launch robot_bridge bringup.launch.py profile:=sim
-# 다른 터미널
-ros2 topic hz /robot/loading/cmd_degs      # ≈ 20 Hz
-ros2 run robot_bridge mode_cli --get
+ros2 service call /robot/loading/set_hold \
+  robot_bridge_msgs/srv/SetHold "{hold: false}"
 ```
 
-**여기까지는 로봇이 없어도 반드시 통과해야 한다.** 통과 못 하면 현장에서 하지 말고
-사무실에서 해결하고 가는 게 맞다.
+50% → Hold 설정/해제 → 이상해제 pulse가 `accepted/controller_ack` 및
+`register_readback=true`인지 확인한다. speed의 `confirmed=false`는 actual feedback
+주소가 없기 때문에 정상이다. simulation 성공은 field 동작 보장이 아니다.
 
----
+## 1. 현재 확인된 물리/IP
 
-## 1. 랜선 연결 · 링크 확인
+2026-08-18 read-only 시험 결과:
+
+```text
+Jetson eno1 + 임시 192.168.10.61/24
+PLC              192.168.10.30/24
+ping             3/3 성공, 평균 약 1.57 ms
+PLC MAC          30:be:3b:60:94:ca
+TCP 9000         MC 3E Binary D1000 batch-read 성공
+```
+
+즉 케이블/L2/IP subnet은 정상이다. 기존 Jetson `192.168.0.61/24`는 PLC와 다른
+subnet이라 직접 통신되지 않았고 패킷이 Wi-Fi default route로 빠졌다. PLC NIC는
+`192.168.10.61/24`, gateway/DNS 없음, `never-default`로 설정한다.
 
 ```bash
-ip -br link                    # 상태 확인
+nmcli device status
+ip route get 192.168.10.30
+ping -c 3 192.168.10.30
 ```
 
-**기대** : 해당 포트가 `UP`
-**아니면** : 케이블 · 스위치 포트 · 상대 장비 전원. 여기서 막히면 소프트웨어 문제가 아니다.
+`ip route get` 결과는 PLC NIC와 `src 192.168.10.61`이어야 한다.
 
----
+## 2. PLC MC Open Setting 확인
 
-## 2. 자동 탐색  ← **여기가 핵심**
+PLC 담당자에게 GX Works 화면 또는 parameter export로 아래를 받는다.
 
-IP 도 포트도 몰라도 된다. 그냥 돌린다.
+- CPU/Ethernet 모듈 형명
+- TCP + MC Protocol Open Setting
+- 실제 local port `9000`
+- 3E/4E, binary/ASCII
+- online change/RUN write 정책과 remote password
 
 ```bash
-python3 tools/plc_scan.py
+python3 tools/plc_probe.py \
+  --host 192.168.10.30 --port 9000 --dump D1000 21
 ```
 
-이게 순서대로 한다.
+## 3. 로봇별 PLC-local map 확인
 
-| 단계 | 하는 일 |
-|---|---|
-| 1 | 인터페이스 · 현재 IP |
-| 2 | **수동 청취** 8초 — 아무것도 안 보내고 상대가 떠드는 걸 듣는다 |
-| 3 | **ARP 테이블** — MAC 이 미쓰비시 OUI 면 표시해 준다 |
-| 4 | **포트 훑기** — 자국 대역 × MELSEC 상용 포트 17종 |
-| 5 | **MC 신원 확인** — 열린 포트마다 `3E/4E × 바이너리/ASCII` 4조합 시도 |
+현대 자료의 sample은 다음과 같지만 Main PLC 실제주소로 확정된 것이 아니다.
 
-**신원 확인이 핵심이다.** 포트가 열렸다고 MC 포트인 건 아니다. 실제로 MC 요청을
-보내 보고 **응답이 오면** 그 포트가 맞다. 정상응답이든 `0xC056`(디바이스 범위 초과)
-같은 오류응답이든 상관없다 — **요청 형식을 알아듣고 대답했다는 게 증거**다.
-
-찾으면 이렇게 나온다.
-
-```
-찾았습니다 — 1곳
- · 192.168.0.10:5000  frame=3E  code=binary   정상응답
-   D0 = [0]
-
-config/plc.yaml 의 field 프로파일에 그대로 넣으십시오 :
-  field:
-    connection:
-      host: 192.168.0.10
-      port: 5000
-      frame: "3E"
-      protocol: "binary"
+```text
+pose             D1000, D1002..D1013
+speed request    D1016=25, D1018=50, D1020=75
+control request  D1100.0~5 (bit1은 read-only)
 ```
 
-### 자국 IP 가 없거나 대역이 다를 때
+로딩·언로딩마다 서로 다른 PLC CPU device range를 받아야 한다. 같은 map을 두
+instance에 복사하지 않는다. `config/robots.yaml`에 실제 map, word order,
+scale/sign/offset을 반영하고 펜던트의 세 자세 이상과 비교한다.
 
-우리 쪽에 그 대역 IP 가 없으면 스캔 자체가 불가능하다. 후보 대역을 하나씩 달아 본다.
+## 4. 읽기 전용 field 시작
+
+public launch는 No.9~17 write gate를 닫은 채 읽기만 수행한다.
 
 ```bash
-sudo ip addr add 192.168.0.100/24 dev eth0
-python3 tools/plc_scan.py --subnet 192.168.0.0/24
-sudo ip addr del 192.168.0.100/24 dev eth0
-
-# 미쓰비시 공장 출하 기본값이 192.168.3.x 대역인 경우가 흔하다
-sudo ip addr add 192.168.3.100/24 dev eth0
-python3 tools/plc_scan.py --subnet 192.168.3.0/24
+ros2 launch robot_bridge robot_system.launch.py sim:=false debug:=true
+ros2 topic hz /robot/loading/pose
+ros2 topic echo /robot/loading/control_state --once
 ```
 
-`192.168.0` → `192.168.1` → `192.168.3` → `192.168.10` → `10.0.0` 순으로 찍어 보면
-대개 걸린다. 각 대역당 1분이면 끝난다.
+확인 항목:
 
-### IP 는 아는데 포트만 모를 때
+- 실제 pose가 움직이고 축 순서/부호/단위가 펜던트와 일치
+- D1016/18/20 및 D1100.0~5가 `/control_state`와 일치
+- 케이블을 빼면 `fresh=false`/UNKNOWN, 이전 상태를 정상으로 표시하지 않음
+- 재연결돼도 run 또는 다른 command register write가 0건
+
+## 5. 승인된 write FAT
+
+fenced cell, 저속, 안전담당자 입회 조건에서만 allowlisted field write를 명시적으로
+연다. raw `plc_probe --write` 대신 ROS service를 사용한다.
 
 ```bash
-python3 tools/plc_scan.py --host 192.168.0.10
+ros2 launch robot_bridge plc_bringup.launch.py profile:=field debug:=true \
+  with_unity:=true allow_field_control_writes:=true
+
+ros2 service call /robot/loading/set_speed_percent \
+  robot_bridge_msgs/srv/SetSpeedPercent "{speed_percent: 50.0}"
+ros2 service call /robot/loading/set_hold \
+  robot_bridge_msgs/srv/SetHold "{hold: true}"
 ```
 
----
+`controller_ack=true`는 MC write 성공, `register_readback=true`는 같은 명령
+주소 재확인일 뿐이다. 실제 로봇 동작은 펜던트와 눈으로 별도 확인한다. D1100.1
+비상정지는 서비스로 쓰지 않는다.
 
-## 3. 탐색이 실패했을 때 — 원인은 셋뿐
+## 6. fault injection
 
-| # | 원인 | 확인법 | 조치 |
-|---|---|---|---|
-| ① | 물리 연결 | 링크 LED · `ip -br link` | 케이블 · 포트 |
-| ② | 대역 불일치 | `--subnet` 으로 후보 대역 순회 | 2번 절 참고 |
-| ③ | **MC 프로토콜 미개방** | `ping` 은 되는데 어떤 포트도 안 열림 | **스캔으로 못 뚫는다** |
+- Jetson node kill/restart: 자동 command write/자동 run 없음
+- PLC cable pull: PLC 자체 watchdog으로 제한 상태, ROS는 stale/UNKNOWN
+- PLC reboot: 재접속 후 read-only 상태부터 시작
+- invalid/중복 map: launch 전 config validation 실패
+- ACK timeout/reject: service `confirmed=false`, 원인을 log/status에 보존
 
-**③ 이면 여기서 멈춘다.** 내장 Ethernet 은 기본적으로 닫혀 있고, GX Works 에서
-「오픈 설정 → MC 프로토콜」을 해줘야 열린다. 우리가 Jetson 에서 할 수 있는 일이 없다.
-
-> 이 경우 에이시스에 요청할 것 (`docs/02_plc_setup.md` 2.2)
-> - 오픈 설정 : TCP · **MC 프로토콜** · 자국 포트번호
-> - 교신 데이터 코드 : 바이너리 권장
-> - **RUN 중 쓰기 허용** 체크 (없으면 정지/속도제한 명령을 못 내린다)
-> - 원격 패스워드 해제
-
-`ping` 이 되는데 포트가 하나도 안 열리면 ③ 이 거의 확정이다.
-
----
-
-## 4. 실제 데이터 확인
-
-```bash
-# plc.yaml 에 위에서 나온 값을 넣고
-python3 tools/plc_probe.py --profile field
-```
-
-**기대** : D1000~D1013 덤프 + 6축 각도가 보인다.
-
-```
-  ✓ MC 응답 정상 (end code 0x0000) — D1000 × 14
-    D1000       1 (0x0001)
-    ...
-  6축 원시값 → 각도 (scale 0.001 가정)
-    J1   raw      45000   →    45.000°
-```
-
-**아니면**
-
-| 오류 | 뜻 | 조치 |
-|---|---|---|
-| `0xC056` | 디바이스 범위 초과 | D1000 대역이 안 쓰이는 것. 에이시스에 실주소 확인 (C-22) |
-| `0xC05B` | 디바이스 접근 불가 | `RwrD` 가 D 가 아닐 수 있다 → `W` 로 바꿔 시도 |
-| 값이 전부 0 | 통신은 되는데 데이터가 안 실림 | 로봇 운전 중인지, PLC 프로그램이 그 D 에 쓰는지 |
-
-### `RwrD` 가 D 가 아닐 가능성 — 실제로 꽤 높다
-
-`RwrD2000` 은 CC-Link 링크 레지스터 표기다. PLC 실 디바이스가 `D` 가 아니라
-`W`(링크 레지스터)일 수 있다. 코드는 `W`·`R`·`ZR` 다 지원하니 **주소만 바꾸면 된다.**
-
-```bash
-python3 tools/plc_probe.py --profile field --dump W1000 14
-python3 tools/plc_probe.py --profile field --dump R1000 14
-```
-
----
-
-## 5. 쓰기 확인  (조심 — 실제 로봇이 반응한다)
-
-**로봇 주변에 사람이 없는지 확인하고, 티치펜던트 비상정지를 손에 쥔 상태에서.**
-
-```bash
-python3 tools/plc_probe.py --profile field --write D2000 0 1 0   # 보호정지
-python3 tools/plc_probe.py --profile field --dump  D2000 3       # 되읽기
-```
-
-**기대** : 되읽기 값이 `[0, 1, 0]`
-**아니면** : `0xC05B` 또는 되읽어도 `[0,0,0]` → **RUN 중 쓰기 금지** 상태다.
-읽기만 하고 명령은 에이시스 컨트롤러 경유로 가야 한다.
-
----
-
-## 6. 브리지 기동
-
-```bash
-ros2 launch robot_bridge bringup.launch.py profile:=field
-ros2 topic hz /robot/loading/cmd_degs        # ≥ 18 Hz
-ros2 run robot_bridge mode_cli --watch       # 모드 변화 감시
-```
-
----
-
-## 7. 축 캘리브레이션
-
-지금까지는 `scale 0.001` 가정이라 각도가 실제와 다를 수 있다.
-
-```bash
-python3 tools/plc_probe.py --profile field --watch
-```
-
-띄워 놓고 티치펜던트로 **J1 만 정확히 +90°** 조그 → raw 변화량 `Δraw` 기록.
-
-```
-scale = 90 / Δraw
-```
-
-6축 다 하고 `config/robots.yaml` 에 넣은 뒤 `calibrated: true`.
-상세는 `docs/04_calibration.md`.
-
----
-
-## 오늘 밤 미리 해둘 것
-
-- [ ] Jetson 에 클론 · `colcon build` 통과
-- [ ] `profile:=sim` 으로 전 구간 동작 확인
-- [ ] `python3 tools/plc_scan.py --host 127.0.0.1 --ports 5010` 으로 스캐너 동작 확인
-- [ ] 에이시스에 **미리** 물어볼 것 정리 : MC 개방 여부 · 포트번호 · `RwrD` 실주소 ·
-      RUN 중 쓰기 허용 여부 (`확인필요_기입표.md` C-17~C-24)
-
-현장에서 제일 오래 걸리는 건 코드가 아니라 **③ 미개방** 확인 왕복이다.
-가능하면 가기 전에 답을 받아 두는 게 하루를 아낀다.
+현장 Go 조건은 네트워크가 정상일 때의 명령 성공만이 아니라, 통신·Jetson 장애
+중에도 PLC와 독립 안전회로가 예상 상태를 유지하는 것이다.

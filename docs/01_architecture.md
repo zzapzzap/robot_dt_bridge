@@ -1,95 +1,114 @@
-# 구조 — 메신저 2개
+# 운영 아키텍처
 
-```
-                    ┌───────────────────────── 메신저 ① ─────────────────────────┐
-                    │                                                            │
-   ┌────────┐  CC-Link  ┌─────────┐  Ethernet  ┌──────────────┐   ROS 2   ┌──────────────┐
-   │ Robot  │◄─────────►│ 공정 PLC │◄──────────►│ robot_bridge │◄─────────►│    Unity     │
-   │ YS080  │  2.5 Mbps │ MELSEC  │  MC 3E     │  (Host AGX)  │  TCP-EP   │ Digital Twin │
-   └────────┘           └─────────┘            └──────┬───────┘           └──────────────┘
-                    │                                 │                            │
-                    └───────────── 메신저 ② ──────────┘                            │
-                                                      │                            │
-                                          ┌───────────▼──────────┐                 │
-                                          │  XDI (정지) · XAG    │                 │
-                                          │  (감속) · MVP(작업자) │─────────────────┘
-                                          └──────────────────────┘
+## 기본 경로: Robot ↔ PLC ↔ Jetson
+
+```text
+현대 로봇 컨트롤러 1..N
+        │ CC-Link / 현장 I/O
+        ▼
+  Mitsubishi 공정 PLC                    하드와이어 안전회로
+        │ PLC-local mirror/command        E-stop/guard/safety PLC
+        │ MC Protocol TCP                         │
+        ▼                                         ▼
+  plc_gateway_node  ── ROS 2 상태/서비스 ── RViz / Unity / XAI
 ```
 
----
+Jetson은 PLC의 MC TCP client다. PLC가 pose/status를 CPU device 영역에 mirror하면
+gateway가 polling하고, 승인된 service 요청을 PLC command 영역에 쓴다. 이는
+“PLC가 Jetson으로 ROS를 push”하는 방식이 아니다.
 
-## 메신저 ② — ROS 2 ↔ PLC  (`robot_memory_node`)
+물리 endpoint는 PLC 한 개다. `loading`, `unloading`은 로봇 IP instance가 아니라
+PLC 내부에서 서로 겹치지 않는 register-map instance다. 현재 제공 자료에는 두
+번째 현대 로봇의 PLC-local 블록이 없어 `loading`만 활성화한다.
 
-**읽기** `D1000~D1013` 20 Hz 폴링 → `RobotMemory` · `RobotPose` 발행
-**쓰기** `RobotCommand` 구독 → `safety_gate` 중재 → `D2000~/D3000~` 기록 (19 Hz 재기록)
-
-- MC 프로토콜 3E 바이너리를 **표준 라이브러리만으로** 구현 (`mc_client.py`)
-- 연결 끊기면 지수 백오프 재접속, 그 사이 `link_ok=false` 를 계속 알림
-- `watchdog_timeout_ms` 초과 시 `fail_safe`(기본 hold)를 강제 기록
-
-## 메신저 ① — Unity ↔ ROS 2  (`unity_adapter_node` + C# 4종)
-
-커스텀 msg ↔ `std_msgs` 양방향 변환. Unity 는 **코드 생성 없이** 표준 타입만 쓴다.
-
-| Unity 스크립트 | 역할 |
-|---|---|
-| `DtBridgeConfig` | IP · 토픽 · 배열 인덱스를 한 곳에서 관리 |
-| `RobotPoseReceiver` | `cmd_degs[6]` → 6축 관절 회전 (보간 · home 보정 · sign 뒤집기) |
-| `RobotStateReceiver` | `state[7]` → 로봇 색상 · 경광등 · 상태 라벨 |
-| `WorkerPoseReceiver` | `bodies` → 28관절 스켈레톤 런타임 생성 (최대 5인) |
-| `SafetyCommandSender` | 조작 패널 → `unity_command[6]` 발행 |
-| `DtSceneBootstrap` | 빈 씬에서 위 전부를 코드로 구성 |
-
----
-
-## 왜 씬을 가볍게 했나
-
-기존 `robot_workshell` 은 HDRP 공장 씬이라 데이터가 무겁고 로딩이 길다.
-이 프로젝트는 **바닥 그리드 + 로봇 + 사람** 만 그린다.
-
-| | robot_workshell | robot_dt_bridge |
-|---|---|---|
-| 배경 | HDRP 공장 전체 | 그리드 라인만 |
-| 로봇 | STEP 임포트 필수 | 프리미티브 대체 모델 자동 생성 (STEP 도 꽂을 수 있음) |
-| 사람 | 리깅된 캐릭터 | 구 + 원통 스켈레톤 (런타임 생성) |
-| 씬 파일 | 수백 MB | **0** — 코드로 구성 |
-
-성능이 필요해지면 `robotRoot` 에 STEP 모델을 꽂고 `autoBuildPlaceholder` 를 끄면 된다.
-
----
-
-## 안전 중재 (`safety_gate.py`)
-
-CDR 후속조치 **AI-102 「XDI ↔ XAG 중재 규칙」** 의 구현부다.
-
-| 지령 | 우선순위 | 발행자 |
-|---|---|---|
-| `stop` | 100 | XDI (Edge · 긴급) |
-| `hold` | 80 | XDI |
-| `speed_down_3` | 60 | XAG (Host · 정밀) |
-| `speed_down_2` | 40 | XAG |
-| `speed_down_1` | 20 | XAG |
-| `run` | 0 | Unity · 운전원 |
-
-1. 높은 우선순위가 이긴다 · 동순위면 최신이 이긴다
-2. `command_timeout_ms`(300 ms) 안에 갱신 없으면 지령 소멸 → 자동 복귀
-3. 긴급(run/hold/stop)과 감속(1/2/3)은 서로 독립이되, **정지·일시정지 중에는
-   감속 지령을 겹쳐 쓰지 않는다**
-4. PLC 링크가 끊기면 `fail_safe` 를 강제
-
----
-
-## 실행 흐름
-
+```text
+robot_system.launch.py                공개 진입점: sim/debug만
+  └─ plc_bringup.launch.py            field/sim 구성, field read preflight
+      ├─ fake_plc                     sim에서만
+      ├─ plc_gateway_node             MC session 1개, instance N개
+      ├─ unity_adapter_node           pose/status만 전달, command topic 차단
+      └─ debug=true
+          ├─ robot_state_publisher
+          ├─ static base TF
+          └─ RViz
 ```
-profile: sim                              profile: field
-──────────────                            ──────────────
-fake_plc_node (127.0.0.1:5010)            실제 PLC (192.168.0.10:5000)
-fake_worker_node (2명 더미)                MVP multiview_pose (실 작업자)
-        │                                         │
-        └──────► robot_memory_node ◄──────────────┘
-                        │
-                 unity_adapter_node
-                        │
-                     Unity
+
+## 읽기 경로
+
+한 poll snapshot에서 instance별로 다음을 만든다.
+
+```text
+PLC pose/status device
+  ├─ RobotMemory       raw register + link quality
+  ├─ RobotPose         degree + raw 6-axis
+  ├─ JointState        radian, RViz/TF
+  ├─ RobotStatus       actual state + fresh/age
+  └─ Unity adapter     /cmd_degs, /state, /mode_unity
 ```
+
+actual run/hold/stop/speed는 PLC feedback에서만 만든다. 마지막으로 보낸 command를
+actual처럼 echo하지 않는다. 통신이 끊기면 이전 bool을 “정상”으로 재사용하거나
+가짜 E-stop을 만들지 않고 `fresh=false`, signal `UNKNOWN`으로 보낸다.
+
+자료의 DT buffer 갱신은 약 55.1 ms(약 18 Hz)다. field의 20 Hz poll은 지연을
+줄이기 위한 것이며 매번 새로운 로봇 sample을 보장하지 않는다.
+
+## 쓰기 경로
+
+공개 경로는 Unity command topic을 로봇으로 전달하지 않는다. 명령은 확인형 ROS
+service만 받으며, 세 단계를 구분한다.
+
+```text
+ROS service request
+  → accepted          Jetson policy/설정 통과
+  → controller_ack    PLC MC write response 정상
+  → register_readback command register 재조회 일치
+  → confirmed         별도 PLC actual feedback/ack 재조회 일치
+```
+
+부팅, 재접속, timeout만으로는 어느 register에도 쓰지 않는다. 특히 run bit를 자동
+복원하지 않는다. `100%` 요청은 D1016/D1018/D1020만 0으로 만들고 START하지 않는다.
+
+`request_stop`은 PLC의 비안전 공정 정지 요청이다. 물리 비상정지 서비스가 아니다.
+네트워크가 끊기면 Jetson은 같은 네트워크로 stop을 보낼 수 없으므로 PLC ladder가
+Jetson heartbeat timeout을 감시해 자체적으로 제한 상태로 전환해야 한다.
+
+## field와 sim
+
+```bash
+ros2 launch robot_bridge robot_system.launch.py
+ros2 launch robot_bridge robot_system.launch.py sim:=false debug:=true
+```
+
+- `sim`: localhost fake PLC가 같은 No.9~17 register 계약을 제공한다. pose,
+  speed/Hold/action service, RViz/Unity 데이터 경로를 시험한다.
+- 기본 인자는 `sim:=true debug:=true`이다. sim의 PLC 축좌표는
+  `[38.56, 136.25, -49.48, 0.17, -86.85, -50.68]` degree이며,
+  RViz/Unity에는 CAD 변환 `[-S,H-90,-V,-R2,B,-R1]`을 적용해
+  `[-38.56, 46.25, 49.48, -0.17, -86.85, 50.68]`로 표시한다. `Hold=true`로
+  시작하고 `set_hold(false)` 서비스로 애니메이션을 시작한다.
+- `field`: read-only preflight 후 gateway를 만들며 No.9~17 write는 별도의
+  `allow_field_control_writes` opt-in이 있어야 열린다. controller 좌표와
+  CAD 시각화 변환은 sim과 같은 계약을 사용한다.
+- `debug`: 데이터 원천이나 write policy를 바꾸지 않고 TF/RViz만 추가한다.
+
+## 현장 계약이 필요한 이유
+
+참고자료의 `D1000...`은 현대 로봇 측 memory 표이고 `RwrD1000...`은 상위 통신
+buffer 표기다. 이 값이 Main PLC CPU에서 MC로 접근할 실제 `D/W/R/ZR` 주소와
+같다는 증거가 없다. `RwrD2000`, `RwrD3000`도 PLC `D2000`, `D3000`으로 단정할
+수 없다. 그래서 sample map은 sim에서만 확정값처럼 쓰고 field는 아래 계약을
+받기 전 fail-closed다.
+
+- PLC CPU/Ethernet 모듈, IP/subnet, MC Open Setting
+- TCP port(5000~5009 제외), 3E/4E, binary/ASCII
+- instance별 pose/status/request/actual/ack device
+- DWORD word order, unit/scale/sign/offset
+- command level/pulse, one-hot, reset timing, reject result
+- heartbeat/sequence/ack와 PLC-side communication-loss policy
+
+## 별도 Hi6 direct 경로
+
+`hi6_bringup.launch.py`와 `docs/07_hi6_direct.md`는 PLC를 거치지 않는 컨트롤러
+Open API 실험용으로 보존한다. `robot_system.launch.py`에서는 include하지 않으며
+현 공정 운영 구조의 fallback이나 자동 선택 경로가 아니다.
